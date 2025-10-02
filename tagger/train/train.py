@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 
 # Third parties
 import numpy as np
+import yaml
 
 # Import from other modules
 from tagger.data.tools import load_data, to_ML
@@ -10,11 +11,30 @@ from tagger.model.common import fromFolder, fromYaml
 from tagger.plot.basic import basic
 
 
+# Enable GPU usage and avoid TF pre-allocating all memory
+gpus = tf.config.list_physical_devices('GPU')
+tf.config.set_visible_devices(gpus[2:], 'GPU')  # Only first 2 GPUs
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print(f"Using {len(gpus)} GPU(s): {[gpu.name for gpu in gpus]}")
+    except RuntimeError as e:
+        print("Error setting GPU memory growth:", e)
+else:
+    print("No GPUs detected, running on CPU.")
+
+
+
 def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
-
+    use_jets = True
     os.makedirs(os.path.join(out_dir, 'testing_data'), exist_ok=True)
-
-    np.save(os.path.join(out_dir, "testing_data/X_test.npy"), X_test)
+    if use_jets:
+        np.save(os.path.join(out_dir, "testing_data/X_test_constits.npy"), X_test[0])
+        np.save(os.path.join(out_dir, "testing_data/X_test_jets.npy"), X_test[1])
+    else:
+        np.save(os.path.join(out_dir, "testing_data/X_test_constits.npy"), X_test)
+    #np.save(os.path.join(out_dir, "testing_data/X_test.npy"), X_test)
     np.save(os.path.join(out_dir, "testing_data/y_test.npy"), y_test)
     np.save(os.path.join(out_dir, "testing_data/truth_pt_test.npy"), truth_pt_test)
     np.save(os.path.join(out_dir, "testing_data/reco_pt_test.npy"), reco_pt_test)
@@ -34,6 +54,10 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
 
     sample_weights = np.ones(num_samples)
 
+    print("y_train shape:", y_train.shape)
+    print("reco_pt_train shape:", reco_pt_train.shape)
+
+
     # Define pT bins (without the high pT part we don't care about)
     pt_bins = np.array(
         [15, 17, 19, 22, 25, 30, 35, 40, 45, 50, 60, 76, 97, 122, 154, np.inf]
@@ -44,7 +68,10 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
 
     # Initialize counts per class per pT bin
     class_pt_counts = {}
-
+    print("y_train shape:", y_train.shape)
+    print("type(y_train):", type(y_train))
+    print("reco_pt_train shape:", reco_pt_train.shape)
+ 
     # Calculate counts per class per pT bin
     for _label, idx in class_labels.items():
         class_mask = y_train[:, idx] == 1
@@ -90,6 +117,8 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
         6: 1.0,  # muon
         7: 1.0,  # electron
     }
+    num_classes = y_train.shape[-1]
+    weights_per_class = {idx: 1.0 for idx in range(num_classes)}
     for idx in class_labels.values():
         weights_per_class_pt_bin[idx] = weights_per_class_pt_bin[idx] * weights_per_class[idx]
 
@@ -117,10 +146,10 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
     return sample_weights
 
 
-def train(model, out_dir, percent):
+def train(model, data, out_dir, percent):
 
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
-    data_train, data_test, class_labels, input_vars, extra_vars = load_data("training_data/", percentage=percent)
+    data_train, data_test, class_labels, input_vars, extra_vars = load_data(data, percentage=percent)
     model.set_labels(
         input_vars,
         extra_vars,
@@ -133,6 +162,9 @@ def train(model, out_dir, percent):
     # Save X_test, y_test, and truth_pt_test for plotting later
     X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(data_test, class_labels)
     save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
+    print("y_train shape:", y_train.shape)
+    print("type(y_train):", type(y_train))
+    print("reco_pt_train shape:", reco_pt_train.shape)
 
     # Calculate the sample weights for training
     sample_weight = train_weights(
@@ -147,6 +179,26 @@ def train(model, out_dir, percent):
         print(sample_weight)
 
     # Get input shape
+    use_jets = True 
+    if use_jets:
+        X_train_constits, X_train_jets = X_train
+        inputs = {"constituent_inputs": X_train_constits, "jet_inputs": X_train_jets}
+        constituents_shape = X_train_constits.shape[
+            1:
+        ]  # First dimension is batch size, input shape is NCONSTITUENTS x NFEATURES
+        jets_shape = X_train_jets.shape[
+            1:
+        ]  # First dimension is batch size, input shape is NJETS x NFEATURES
+    else:
+        inputs = {"constituent_inputs": X_train}
+        constituents_shape = X_train.shape[
+            1:
+        ]  # First dimension is batch size, input shape is NCONSTITUENTS x NFEATURES
+        jets_shape = (
+            None  # First dimension is batch size, input shape is NJETS x NFEATURES
+        )
+    
+    X_train = X_train_constits
     input_shape = X_train.shape[1:]  # First dimension is batch size
     output_shape = y_train.shape[1:]
 
@@ -182,7 +234,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
+    with open(args.yaml_config, 'r') as stream:
+        yaml_dict = yaml.safe_load(stream)
+    dataset = yaml_dict['data']
     # mlflow.set_experiment(os.getenv('CI_COMMIT_REF_NAME'))
 
     if args.plot_basic:
@@ -202,7 +256,7 @@ if __name__ == "__main__":
 
     else:
         model = fromYaml(args.yaml_config, args.output)
-        train(model, args.output, args.percent)
+        train(model, dataset, args.output, args.percent)
         # with mlflow.start_run(run_name=args.name) as run:
         #     mlflow.set_tag('gitlab.CI_JOB_ID', os.getenv('CI_JOB_ID'))
         #     mlflow.keras.autolog()

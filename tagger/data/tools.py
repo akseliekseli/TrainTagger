@@ -31,6 +31,105 @@ def _add_response_vars(data):
         data['jet_pt_raw'] / data['jet_genmatch_pt'], copy=True, nan=0.0, posinf=0.0, neginf=0.0
     )
 
+def _define_target(data, all_labels: None):
+    """
+    Splits data by particle flavor and applies conditions for each category. Also creates the pT target.
+
+    Parameters:
+        data (awkward array): The input data to split.
+
+    Returns:
+        dict: A dictionary containing the split data by label.
+    """
+
+    # genmatch_base = (data["jet_genmatch_pt"] >= 0) | (
+    #    data["jet_genmatch_mass"] >= 0
+    # )  # Only jets matched to a gen jet
+    # data = data[genmatch_base]
+
+    # Define conditions for each label
+    # conditions = {
+    #    "TP": (data["jet_genmatch_Nprongs"] >= 2),
+    #    "BKG": (data["jet_genmatch_Nprongs"] < 2),
+    # }
+
+    # Automatically generate class labels based on the order of keys in conditions
+    # class_labels = {label: idx for idx, label in enumerate(conditions)}    # {"H": 0, "W": 1, "Z": 2, "Two-prong": 3, "Background": 4}
+    
+    #class_labels = dict(zip(all_labels, range(len(all_labels))))
+    #labels = np.zeros(shape=(len(data["fj_label"]), len(class_labels)), dtype=np.float32)
+    
+    # print(labels.shape)
+    #for i, jet in enumerate(data["fj_label"]):
+    #    jet = jet[0].tolist()
+    #    onehot = np.array([x for x in jet.values()])
+    #    labels[i] = onehot
+    
+    for i, jet in enumerate(data["fj_label"]):
+        jet_labels = ak.to_list(jet)
+        jet_labels = list(set(jet_labels))
+        # Fill one-hot
+        for lbl in jet_labels:
+            if lbl in class_labels:
+                idx = class_labels[lbl]
+                labels[i, idx] = 1.0
+            else:
+                print(f"Warning: unknown label {lbl}")
+    data = ak.with_field(data, labels, "class_label")
+    
+    data = ak.with_field(data, labels, "class_label")
+    # Assign numeric values based on conditions using awkward's where function
+    # for label, condition in conditions.items():
+    #    data["class_label"] = ak.where(
+    #        condition, class_labels[label], data["class_label"]
+    #    )
+
+    # Set pT targets
+    pt_ratio = ak.nan_to_num(
+        data["jet_genmatch_pt"] / data["jet_pt_phys"], nan=0, posinf=0, neginf=0
+    )
+    data["target_pt"] = np.clip(pt_ratio, 0.3, 3)
+    data["target_pt_phys"] = np.clip(
+        ak.nan_to_num(data["jet_genmatch_pt"], nan=0, posinf=0, neginf=0), 0, 2000
+    )
+
+    # Set mass targets
+    mass_ratio = ak.nan_to_num(
+        data["jet_genmatch_mass"] / data["jet_mass"], nan=0, posinf=0, neginf=0
+    )
+    data["target_mass"] = np.clip(mass_ratio, 0.3, 3)
+    data["target_mass_phys"] = np.clip(
+        ak.nan_to_num(data["jet_genmatch_mass"], nan=0, posinf=0, neginf=0), 0, 256
+    )
+
+    # Apply pt_cut and mass_cut
+    jet_ptmin_gen, jet_massmin_gen = (data["target_pt_phys"] > 15.0), (
+        data["target_mass_phys"] > 5.0
+    )
+
+    return data[jet_ptmin_gen & jet_massmin_gen], class_labels
+
+
+def get_unique_fj_labels(infile, tree="outnano/Jets", step_size="500 MB"):
+    unique_labels = set()
+
+    for arrays in uproot.iterate(
+        infile,
+        treepath=tree,
+        expressions=["fj_label"],  # only load fj_label
+        step_size=step_size,
+        how="zip",
+    ):
+        fj_labels = arrays["fj_label"]
+        # Flatten jagged array
+        flat = ak.flatten(fj_labels, axis=None)
+        # Use ak.Array to ensure it's an awkward array
+        flat = ak.Array(flat)
+        # Convert to Python list and add unique entries
+        unique_labels.update(list(set(flat.tolist())))
+
+    return sorted(unique_labels)
+
 
 def _split_flavor(data):
     """
@@ -315,9 +414,29 @@ def to_ML(data, class_labels):
     """
     Take in the data from make_data (loaded by load_data) and make them ready for training.
     """
+    keepExtras = False
+    use_jets = True
+    constit_data = (
+        np.asarray(data["nn_inputs"])
+        if keepExtras
+        else np.asarray(data["nn_inputs"])[:, :, :-4]
+    )  # exclude E, px, py and pz
+    constit_feats = constit_data[:, :, :]
+    print(constit_feats.shape)
+    if use_jets:
+        try:
+            X = (constit_feats, np.asarray(data["nn_jet_inputs"]))
+        except KeyError:
+            raise KeyError(
+                "Error: jet-level features not found in data. Please check your dataset or the tag used."
+            )
+    else:
+        X = constit_feats
 
-    X = np.asarray(data['nn_inputs'])
-    y = tf.keras.utils.to_categorical(np.asarray(data['class_label']), num_classes=len(class_labels))
+    
+    #X = np.asarray(data['nn_inputs'])
+    #y = tf.keras.utils.to_categorical(np.asarray(data['class_label']), num_classes=len(class_labels))
+    y = np.asarray(data["class_label"])
     pt_target = np.asarray(data['target_pt'])
     truth_pt = np.asarray(data['target_pt_phys'])
     reco_pt = np.asarray(data['jet_pt_phys'])
@@ -352,8 +471,13 @@ def load_data(outdir, percentage, test_ratio=0.1, fields=None):
     chunks_to_load = int(np.ceil((percentage / 100) * total_chunks))
 
     # Collect the file paths for the chunks to load
-    chunk_files = [metadata[i]["file"] for i in range(chunks_to_load)]
+    #chunk_files = [metadata[i]["file"] for i in range(chunks_to_load)]
 
+    chunk_files = [
+        metadata[int(i * np.floor((1 / (percentage / 100))))]["file"] + ":data"
+        for i in range(chunks_to_load)
+    ]
+    
     # Use uproot.concatenate to load and combine data from multiple files
     data = uproot.concatenate(chunk_files, filter_name=fields, library="ak")
 
@@ -435,7 +559,8 @@ def make_data(
         # Add additional response variables
         # _add_response_vars(data)
         # Split data into all the training classes
-        data_split, class_labels = _split_flavor(data)
+        #data_split, class_labels = _split_flavor(data)
+        data, labels = _define_target(data, all_labels, qcd)
 
         # If first chunk then save metadata of the dataset
         if chunk == 0:

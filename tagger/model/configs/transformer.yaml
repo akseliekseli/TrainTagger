@@ -3,6 +3,8 @@ run_config :
   verbose : 2
   debug : True
 
+data: 'training_data/baseline_hardware_inputs/'
+
 model_config :
   name : transformer
   emb_layers : [32,32]

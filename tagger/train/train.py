@@ -4,13 +4,14 @@ from argparse import ArgumentParser
 # Third parties
 import numpy as np
 import yaml
+import tensorflow as tf
 
 # Import from other modules
 from tagger.data.tools import load_data, to_ML
 from tagger.model.common import fromFolder, fromYaml
 from tagger.plot.basic import basic
 
-
+'''
 # Enable GPU usage and avoid TF pre-allocating all memory
 gpus = tf.config.list_physical_devices('GPU')
 tf.config.set_visible_devices(gpus[2:], 'GPU')  # Only first 2 GPUs
@@ -23,9 +24,8 @@ if gpus:
         print("Error setting GPU memory growth:", e)
 else:
     print("No GPUs detected, running on CPU.")
-
-
-
+'''
+'''
 def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
     use_jets = True
     os.makedirs(os.path.join(out_dir, 'testing_data'), exist_ok=True)
@@ -40,6 +40,19 @@ def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
     np.save(os.path.join(out_dir, "testing_data/reco_pt_test.npy"), reco_pt_test)
 
     print(f"Test data saved to {out_dir}")
+'''
+
+def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
+
+    os.makedirs(os.path.join(out_dir, 'testing_data'), exist_ok=True)
+    #X_test_constits, X_test_jets = X_test
+    np.save(os.path.join(out_dir, "testing_data/X_test.npy"), X_test[0])
+    np.save(os.path.join(out_dir, "testing_data/y_test.npy"), y_test)
+    np.save(os.path.join(out_dir, "testing_data/truth_pt_test.npy"), truth_pt_test)
+    np.save(os.path.join(out_dir, "testing_data/reco_pt_test.npy"), reco_pt_test)
+
+    print(f"Test data saved to {out_dir}")
+
 
 
 def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
@@ -146,10 +159,19 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
     return sample_weights
 
 
-def train(model, data, out_dir, percent):
+def train(model, data, out_dir, percent, labels_to_use):
 
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
     data_train, data_test, class_labels, input_vars, extra_vars = load_data(data, percentage=percent)
+    
+    # Use only labels spesified in the config file
+    if labels_to_use != 'all': 
+        class_labels = {k: v for k, v in class_labels.items() if k in labels_to_use}
+        class_labels = {k: i for i, k in enumerate(class_labels.keys())}
+
+    print(class_labels)
+
+
     model.set_labels(
         input_vars,
         extra_vars,
@@ -161,10 +183,51 @@ def train(model, data, out_dir, percent):
 
     # Save X_test, y_test, and truth_pt_test for plotting later
     X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(data_test, class_labels)
-    save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
-    print("y_train shape:", y_train.shape)
-    print("type(y_train):", type(y_train))
-    print("reco_pt_train shape:", reco_pt_train.shape)
+    
+    
+    ''' 
+    def undersample_majority_class(X, y, keep_frac=0.1, random_state=42):
+        """
+        Keep only a fraction of the samples from the largest class.
+    
+        Args:
+            X (np.ndarray): Features, shape (n_samples, ...).
+            y (np.ndarray): One-hot labels, shape (n_samples, n_classes).
+            keep_frac (float): Fraction of majority class to keep (e.g., 0.1 = 10%).
+            random_state (int): Random seed for reproducibility.
+    
+        Returns:
+            X_new, y_new (undersampled arrays).
+        """
+        rng = np.random.default_rng(random_state)
+    
+        # Get class counts
+        class_counts = y.sum(axis=0)
+        majority_class = np.argmax(class_counts)
+    
+        print(f"Majority class: {majority_class}, count = {class_counts[majority_class]}")
+    
+        # Indices of samples in each group
+        idx_majority = np.where(y[:, majority_class] == 1)[0]
+        idx_other = np.where(y[:, majority_class] == 0)[0]
+    
+        # Randomly choose 10% of majority class
+        keep_size = int(len(idx_majority) * keep_frac)
+        idx_keep_majority = rng.choice(idx_majority, size=keep_size, replace=False)
+    
+        # Combine back
+        new_idx = np.concatenate([idx_keep_majority, idx_other])
+        rng.shuffle(new_idx)
+    
+        return X[new_idx], y[new_idx]
+
+    print("Before:", y_train.sum(axis=0)[np.argmax(y_train.sum(axis=0))])
+
+    X_train, y_train = undersample_majority_class(X_train, y_train, keep_frac=0.05)
+
+    print("After:", y_train.sum(axis=0)[np.argmax(y_train.sum(axis=0))])
+    '''
+
 
     # Calculate the sample weights for training
     sample_weight = train_weights(
@@ -199,6 +262,13 @@ def train(model, data, out_dir, percent):
         )
     
     X_train = X_train_constits
+    X_test = X_test
+
+    save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
+    print("y_train shape:", y_train.shape)
+    print("type(y_train):", type(y_train))
+    print("reco_pt_train shape:", reco_pt_train.shape)
+    
     input_shape = X_train.shape[1:]  # First dimension is batch size
     output_shape = y_train.shape[1:]
 
@@ -237,6 +307,7 @@ if __name__ == "__main__":
     with open(args.yaml_config, 'r') as stream:
         yaml_dict = yaml.safe_load(stream)
     dataset = yaml_dict['data']
+    labels_to_use = yaml_dict['labels']
     # mlflow.set_experiment(os.getenv('CI_COMMIT_REF_NAME'))
 
     if args.plot_basic:
@@ -256,7 +327,7 @@ if __name__ == "__main__":
 
     else:
         model = fromYaml(args.yaml_config, args.output)
-        train(model, dataset, args.output, args.percent)
+        train(model, dataset, args.output, args.percent, labels_to_use)
         # with mlflow.start_run(run_name=args.name) as run:
         #     mlflow.set_tag('gitlab.CI_JOB_ID', os.getenv('CI_JOB_ID'))
         #     mlflow.keras.autolog()

@@ -871,6 +871,7 @@ def basic(model, signal_dirs):
                 class_pairs.append(class_pair)
 
     # Make ROC binaries for complete test set and each signal process
+    '''
     for i in range(-1, len(signal_dirs), 1):
         sample_plot_dir = os.path.join(model.output_directory, "plots/physics", f"binary_rocs_{signal_dirs[i]}")
         if i == -1:
@@ -902,9 +903,9 @@ def basic(model, signal_dirs):
             binary_dir_full = os.path.join(sample_plot_dir, "full_sample")
             ROC_jets(sample_preds, sample_labels, model.class_labels, binary_dir_full, process_label)
             ROC_taus(sample_preds, sample_labels, model.class_labels, binary_dir_full, process_label)
-
+    '''
     # Efficiencies
-    efficiency(y_pred, y_test, reco_pt_test, model.class_labels, plot_dir)
+    #efficiency(y_pred, y_test, reco_pt_test, model.class_labels, plot_dir)
 
     # Confusion matrix
     confusion(y_pred, y_test, model.class_labels, plot_dir)
@@ -916,10 +917,10 @@ def basic(model, signal_dirs):
     plot_input_vars(X_test, model.input_vars, plot_dir)
 
     # Plot inclusive response and individual flavor
-    response(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
+    #response(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # Plot the rms of the residuals vs pt
-    rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
+    #rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # Plot the shaply feature importance
     plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)

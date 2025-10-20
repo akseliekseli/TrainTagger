@@ -78,7 +78,6 @@ CLASS_LABEL_STYLE = {
     "jets": "Jets (b, charm, light, gluon)",
     "leptons": "Leptons (muon, electron)",
 
-    # Added from your class labels (no arrows)
     "H_bb": "$H_{bb}$",
     "H_cc": "$H_{cc}$",
     "H_ee": "$H_{ee}$",
@@ -110,6 +109,7 @@ CLASS_LABEL_STYLE = {
     "Top_bWtauev": "$t_{bW\\tau_e\\nu}$",
     "Top_bWtauhv": "$t_{bW\\tau_h\\nu}$",
     "Top_bWtaumv": "$t_{bW\\tau_\\mu\\nu}$",
+    "background": "background",
 
     "W_ev": "$W_{e\\nu}$",
     "W_mv": "$W_{\\mu\\nu}$",
@@ -117,6 +117,9 @@ CLASS_LABEL_STYLE = {
     "W_tauev": "$W_{\\tau_e\\nu}$",
     "W_tauhv": "$W_{\\tau_h\\nu}$",
     "W_taumv": "$W_{\\tau_\\mu\\nu}$",
+    "bb": "bb",
+    "cc": "cc",
+    "qq": "qq",
 }
 
 

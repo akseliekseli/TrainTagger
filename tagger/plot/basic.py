@@ -906,6 +906,24 @@ def basic(model, signal_dirs):
     '''
     # Efficiencies
     #efficiency(y_pred, y_test, reco_pt_test, model.class_labels, plot_dir)
+    
+    y_classes = np.argmax(y_test, axis=1)
+
+    # Get class counts directly
+    unique, counts = np.unique(y_classes, return_counts=True)
+    
+    # Get labels in correct order
+    labels = [label for label, idx in sorted(model.class_labels.items(), key=lambda x: x[1])]
+    
+    plt.figure(figsize=(8,5))
+    plt.bar(labels, counts, edgecolor="black")
+    plt.xlabel("Class label")
+    plt.ylabel("Count")
+    plt.title("y_test class distribution")
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(plot_dir, "y_test_histogram.png"), dpi=300)
+    plt.show()
 
     # Confusion matrix
     confusion(y_pred, y_test, model.class_labels, plot_dir)

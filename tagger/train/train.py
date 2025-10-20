@@ -11,6 +11,10 @@ from tagger.data.tools import load_data, to_ML
 from tagger.model.common import fromFolder, fromYaml
 from tagger.plot.basic import basic
 
+
+# Silence some TF warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 '''
 # Enable GPU usage and avoid TF pre-allocating all memory
 gpus = tf.config.list_physical_devices('GPU')
@@ -164,28 +168,28 @@ def train(model, data, out_dir, percent, labels_to_use):
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
     data_train, data_test, class_labels, input_vars, extra_vars = load_data(data, percentage=percent)
     
+    '''
     # Use only labels spesified in the config file
     if labels_to_use != 'all': 
         class_labels = {k: v for k, v in class_labels.items() if k in labels_to_use}
         class_labels = {k: i for i, k in enumerate(class_labels.keys())}
+    '''
+    
+    # Make into ML-like data for training
+    X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train, _ = to_ML(data_train, class_labels, labels_to_use)
+    
+    # Save X_test, y_test, and truth_pt_test for plotting later
+    X_test, y_test, _, truth_pt_test, reco_pt_test, class_labels = to_ML(data_test, class_labels, labels_to_use)
 
-    print(class_labels)
-
-
+    print(f'CLASS LABELS: {class_labels}')
+    
     model.set_labels(
         input_vars,
         extra_vars,
         class_labels,
     )
 
-    # Make into ML-like data for training
-    X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train = to_ML(data_train, class_labels)
 
-    # Save X_test, y_test, and truth_pt_test for plotting later
-    X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(data_test, class_labels)
-    
-    
-    ''' 
     def undersample_majority_class(X, y, keep_frac=0.1, random_state=42):
         """
         Keep only a fraction of the samples from the largest class.
@@ -216,18 +220,25 @@ def train(model, data, out_dir, percent, labels_to_use):
         idx_keep_majority = rng.choice(idx_majority, size=keep_size, replace=False)
     
         # Combine back
-        new_idx = np.concatenate([idx_keep_majority, idx_other])
+        new_idx = np.concatenate([idx_keep_majority, idx_other]).astype(int)
         rng.shuffle(new_idx)
+        print(new_idx)
+        print(new_idx.shape)
+        
+        return new_idx 
     
-        return X[new_idx], y[new_idx]
-
     print("Before:", y_train.sum(axis=0)[np.argmax(y_train.sum(axis=0))])
-
-    X_train, y_train = undersample_majority_class(X_train, y_train, keep_frac=0.05)
-
+    
+    new_idx = undersample_majority_class(X_train, y_train, keep_frac=0.1)
+    y_train = y_train[new_idx]
+    reco_pt_train = reco_pt_train[new_idx]
+    X_train = tuple(x[new_idx] for x in X_train)
     print("After:", y_train.sum(axis=0)[np.argmax(y_train.sum(axis=0))])
-    '''
-
+    
+    new_idx = undersample_majority_class(X_test, y_test, keep_frac=0.03)
+    y_test = y_train[new_idx]
+    reco_pt_test = reco_pt_train[new_idx]
+    X_test = tuple(x[new_idx] for x in X_train)
 
     # Calculate the sample weights for training
     sample_weight = train_weights(
@@ -240,6 +251,7 @@ def train(model, data, out_dir, percent, labels_to_use):
     if model.run_config['debug']:
         print("DEBUG - Checking sample_weight:")
         print(sample_weight)
+    
 
     # Get input shape
     use_jets = True 
@@ -268,6 +280,9 @@ def train(model, data, out_dir, percent, labels_to_use):
     print("y_train shape:", y_train.shape)
     print("type(y_train):", type(y_train))
     print("reco_pt_train shape:", reco_pt_train.shape)
+
+    print(f'Y_DIST: {np.sum(y_train, axis=0)}')
+    print(f'Y_1: {y_train[0]}')
     
     input_shape = X_train.shape[1:]  # First dimension is batch size
     output_shape = y_train.shape[1:]

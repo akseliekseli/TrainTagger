@@ -5,14 +5,13 @@ run_config :
 
 data: 'training_data/baseline_hardware_inputs/'
 labels: 
-  - H_qq
-  - Top_Wqq
-  - Top_bWqq
-  - W_qq
+  bb: [H_bb, W_bb, ]
+  cc: [H_cc]
+  qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
 
 
 model_config :
-  name : transformer
+  name : md_transformer
   emb_layers : [32,32]
   transformer_layers : [[2,16,2,32],[2,16,2,32]] #num_heads, mha_hidden_dim, num_dense_layers, dim_dense_layers
   classification_layers : [32,16]
@@ -23,9 +22,9 @@ quantization_config:
 
 training_config :
   weight_method: "onlyclass"
-  epochs : 5
-  batch_size : 4096
-  learning_rate : 0.01
+  epochs : 100
+  batch_size : 128
+  learning_rate : 0.1
   validation_split : 0.1
 
   loss_weights : [1,1]
@@ -37,6 +36,6 @@ training_config :
 
   ReduceLROnPlateau_factor : 0.5
   ReduceLROnPlateau_patience : 5
-  ReduceLROnPlateau_min_lr : 0.0001
+  ReduceLROnPlateau_min_lr : 0.00001
 
 hls4ml_config:

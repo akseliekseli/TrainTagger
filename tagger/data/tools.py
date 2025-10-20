@@ -409,7 +409,6 @@ def group_id_values(event_id, *arrays, num_elements=2):
 
     return grouped_id[mask], filtered_grouped_arrays
 
-
 '''
 def to_ML(data, class_labels):
     """
@@ -445,70 +444,59 @@ def to_ML(data, class_labels):
     return X, y, pt_target, truth_pt, reco_pt
 '''
 
-
-def to_ML(data, class_labels):
-    """
-    Take in the data from make_data (loaded by load_data) and make them ready for training.
-    Only keeps events corresponding to the labels in class_labels.
-    """
+def to_ML(data, class_labels, combined_mapping=None):
     keepExtras = False
     use_jets = True
 
-    # Constituent-level features
     constit_data = (
         np.asarray(data["nn_inputs"])
         if keepExtras
         else np.asarray(data["nn_inputs"])[:, :, :-4]
-    )  # exclude E, px, py, pz
-    constit_feats = constit_data[:, :, :-16]  # keep only relevant features
-    print(constit_feats.shape)
+    )
+    constit_feats = constit_data[:, :, :]
 
-    # Prepare X
     if use_jets:
         try:
             X = (constit_feats, np.asarray(data["nn_jet_inputs"]))
         except KeyError:
-            raise KeyError(
-                "Error: jet-level features not found in data. Please check your dataset or the tag used."
-            )
+            raise KeyError("Error: jet-level features not found in data.")
     else:
         X = constit_feats
-    
-    # Extract labels and pt arrays from data
-    y = np.asarray(data["class_label"])         # shape (n_events,) or one-hot
+
+    y_int = np.asarray(data["class_label"])
     pt_target = np.asarray(data["target_pt"])
     truth_pt = np.asarray(data["target_pt_phys"])
     reco_pt = np.asarray(data["jet_pt_phys"])
 
+    if y_int.ndim > 1:
+        y_int = y_int.argmax(axis=1)
 
-    # y is one-hot encoded or categorical integers?
-    # If y is one-hot, convert to original label index
-    y_orig = y.argmax(axis=1) if y.ndim > 1 else y  # shape: (n_events,)
-    
-    # Select only the rows with labels in class_labels
-    valid_label_values = list(class_labels.values())
-    event_mask = np.isin(y_orig, valid_label_values)  # shape: (n_events,)
-    
-    # Filter jets only
-    if use_jets:
-        X0 = X[0][event_mask, :, :]  # filter constituents
-        X1 = X[1][event_mask, :]     # filter jets
-        X = (X0, X1)
+    if combined_mapping is not None:
+        new_labels = list(combined_mapping.keys()) + ["background"]
+        new_class_labels = {lbl: i for i, lbl in enumerate(new_labels)}
+
+        old_to_new = {}
+        used = set()
+        for new_lbl, old_list in combined_mapping.items():
+            for old_lbl in old_list:
+                if old_lbl in class_labels:
+                    old_to_new[class_labels[old_lbl]] = new_class_labels[new_lbl]
+                    used.add(old_lbl)
+
+        for old_lbl, old_idx in class_labels.items():
+            if old_lbl not in used:
+                old_to_new[old_idx] = new_class_labels["background"]
+
+        y_new_int = np.array(
+            [old_to_new.get(int(i), new_class_labels["background"]) for i in y_int]
+        )
+
+        y = tf.keras.utils.to_categorical(y_new_int, num_classes=len(new_class_labels))
+        class_labels = new_class_labels
     else:
-        X = X[event_mask, :, :]
+        y = tf.keras.utils.to_categorical(y_int, num_classes=len(class_labels))
 
-    
-    # Filter y and pt arrays
-    y = y[event_mask]
-    pt_target = pt_target[event_mask]
-    truth_pt = truth_pt[event_mask]
-    reco_pt = reco_pt[event_mask]
-    
-    # keep only selected label columns
-    selected_label_indices = [v for v in class_labels.values()]
-    if y.ndim > 1:
-        y = y[:, selected_label_indices]
-    return X, y, pt_target, truth_pt, reco_pt
+    return X, y, pt_target, truth_pt, reco_pt, class_labels
 
 
 def load_data(outdir, percentage, test_ratio=0.1, fields=None):

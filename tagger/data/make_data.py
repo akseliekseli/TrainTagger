@@ -24,10 +24,13 @@ if __name__ == "__main__":
     parser.add_argument(
         '-sig', '--signal-processes', default=[], nargs='*', help='Specify all signal process for individual plotting'
     )
+    parser.add_argument(
+        "--data-outdir", default="training_data/", help="Folder name for the new dataset if using --make-data."
+    )
 
     args = parser.parse_args()
 
-    make_data(infile=args.input, step_size=args.step, extras=args.extras, ratio=args.ratio, tree=args.tree)
+    make_data(infile=args.input, outdir=args.data_outdir, step_size=args.step, extras=args.extras, ratio=args.ratio, tree=args.tree)
 
     # Format all the signal processes used for plotting later
     for signal_process in args.signal_processes:
@@ -36,7 +39,7 @@ if __name__ == "__main__":
         if not os.path.exists(signal_output):
             make_data(
                 infile=signal_input,
-                outdir=signal_output,
+                outdir=args.data_outdir,
                 step_size=args.step,
                 extras=args.extras,
                 ratio=args.ratio,

@@ -64,6 +64,8 @@ def _define_target(data, all_labels: None):
     #    jet = jet[0].tolist()
     #    onehot = np.array([x for x in jet.values()])
     #    labels[i] = onehot
+    class_labels = dict(zip(all_labels, range(len(all_labels))))
+    labels = np.zeros((len(data["fj_label"]), len(class_labels)), dtype=np.float32)
     
     for i, jet in enumerate(data["fj_label"]):
         jet_labels = ak.to_list(jet)
@@ -444,6 +446,28 @@ def to_ML(data, class_labels):
     return X, y, pt_target, truth_pt, reco_pt
 '''
 
+def _make_nn_jet_inputs(data_split, tag):
+
+    features = _get_pfcand_fields(tag)
+
+    # Concatenate all the inputs
+    inputs_list = []
+
+    # Vertically stacked them to create input sets
+    # https://awkward-array.org/doc/main/user-guide/how-to-restructure-concatenate.html
+    # Also pad and fill them with 0 to the number of constituents we are using (nconstit)
+    for field in features:
+        field_array = data_split[field]
+        inputs_list.append(field_array[:, np.newaxis])
+
+    # batch_size, n_particles, n_features
+    inputs = ak.concatenate(inputs_list, axis=1)
+    data_split["nn_jet_inputs"] = inputs
+
+    return
+
+
+
 def to_ML(data, class_labels, combined_mapping=None):
     keepExtras = False
     use_jets = True
@@ -457,7 +481,7 @@ def to_ML(data, class_labels, combined_mapping=None):
 
     if use_jets:
         try:
-            X = (constit_feats, np.asarray(data["nn_jet_inputs"]))
+            X = (constit_feats, np.asarray(data["nn_inputs"]))
         except KeyError:
             raise KeyError("Error: jet-level features not found in data.")
     else:
@@ -472,7 +496,7 @@ def to_ML(data, class_labels, combined_mapping=None):
         y_int = y_int.argmax(axis=1)
 
     if combined_mapping is not None:
-        new_labels = list(combined_mapping.keys()) + ["background"]
+        new_labels = list(combined_mapping.keys()) #+ ["background"]
         new_class_labels = {lbl: i for i, lbl in enumerate(new_labels)}
 
         old_to_new = {}
@@ -483,12 +507,12 @@ def to_ML(data, class_labels, combined_mapping=None):
                     old_to_new[class_labels[old_lbl]] = new_class_labels[new_lbl]
                     used.add(old_lbl)
 
-        for old_lbl, old_idx in class_labels.items():
-            if old_lbl not in used:
-                old_to_new[old_idx] = new_class_labels["background"]
+        #for old_lbl, old_idx in class_labels.items():
+        #    if old_lbl not in used:
+        #        old_to_new[old_idx] = new_class_labels["background"]
 
         y_new_int = np.array(
-            [old_to_new.get(int(i), new_class_labels["background"]) for i in y_int]
+            [old_to_new.get(int(i), 1) for i in y_int]
         )
 
         y = tf.keras.utils.to_categorical(y_new_int, num_classes=len(new_class_labels))
@@ -603,6 +627,10 @@ def make_data(
     num_entries_done = 0
     chunk = 0
 
+    all_labels = get_unique_fj_labels(infile)
+    print(f'\nALL LABELS: {all_labels}\n')
+    print(f"Total entries: {num_entries}")
+    
     for data in uproot.iterate(infile, filter_name=FILTER_PATTERN, how="zip", step_size=step_size, max_workers=8):
 
         num_entries_done += len(data)  # count before cuts
@@ -615,7 +643,7 @@ def make_data(
         # _add_response_vars(data)
         # Split data into all the training classes
         #data_split, class_labels = _split_flavor(data)
-        data, labels = _define_target(data, all_labels, qcd)
+        data_split, class_labels = _define_target(data, all_labels)
 
         # If first chunk then save metadata of the dataset
         if chunk == 0:

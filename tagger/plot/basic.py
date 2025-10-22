@@ -838,7 +838,7 @@ def process_labels(process_key):
 # <<<<<<<<<<<<<<<<< end of plotting functions, call basic to plot all of them
 
 
-def basic(model, signal_dirs):
+def basic(model, signal_dirs, plot_pt_regress=True):
     """
     Plot the basic ROCs for different classes. Does not reflect L1 rate
     Returns a dictionary of ROCs for each class
@@ -927,9 +927,10 @@ def basic(model, signal_dirs):
 
     # Confusion matrix
     confusion(y_pred, y_test, model.class_labels, plot_dir)
-
-    # Plot pt corrections
-    pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir)
+    
+    if plot_pt_regress:
+        # Plot pt corrections
+        pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir)
 
     # Plot input distributions
     plot_input_vars(X_test, model.input_vars, plot_dir)

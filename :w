@@ -14,7 +14,7 @@ pt_regress: True
 
 model_config:
   name: fatjet_md
-  conv1d_layers: [64, 64, 64, 64]
+  conv1d_layers: [64, 64, 64]
   classification_layers: [32, 32]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
@@ -28,9 +28,9 @@ quantization_config:
   pt_output_quantization: [16, 6]
 
 training_config:
-  weight_method: "onlyclass"
+  weight_method: "none"
   epochs: 600
-  batch_size: 256
+  batch_size: 128
   learning_rate: 0.00001
   validation_split: 0.1
 

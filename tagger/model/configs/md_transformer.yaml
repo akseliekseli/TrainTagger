@@ -3,14 +3,15 @@ run_config:
   verbose: 2
   debug: True
 
-data: "training_data/baseline_hardware_inputs/"
+data: "training_data/hqcd/"
 labels:
   bb: [H_bb] # W_bb
-  #cc: [H_cc]
-  #qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
+  cc: [H_cc]
+  qq: [H_qq]
   background: [QCD_others]
 
 pt_regress: True
+hyperparameter_opt: False
 
 model_config:
   name: md_transformer
@@ -23,13 +24,13 @@ model_config:
 quantization_config:
 
 training_config:
-  weight_method: "none"
+  weight_method: "onlyclass"
   epochs: 1000
-  batch_size: 1024
-  learning_rate: 0.000001
+  batch_size: 64
+  learning_rate: 0.01
   validation_split: 0.2
 
-  loss_weights: [1, 0.01]
+  loss_weights: [1, 0.1]
 
   initial_sparsity: 0.0
   final_sparsity: 0.0

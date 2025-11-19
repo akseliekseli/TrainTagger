@@ -1,0 +1,62 @@
+2025-11-17 21:28:52.559603: E tensorflow/compiler/xla/stream_executor/cuda/cuda_dnn.cc:9342] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+2025-11-17 21:28:52.559679: E tensorflow/compiler/xla/stream_executor/cuda/cuda_fft.cc:609] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+2025-11-17 21:28:52.559697: E tensorflow/compiler/xla/stream_executor/cuda/cuda_blas.cc:1518] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+2025-11-17 21:28:52.567875: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: SSE4.1 SSE4.2 AVX AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/requests/__init__.py:86: RequestsDependencyWarning: Unable to find acceptable character detection dependency (chardet or charset_normalizer).
+  warnings.warn(
+/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/calmjs/parse/utils.py:13: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import working_set
+2025-11-17 21:29:06.144858: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1886] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 31075 MB memory:  -> device: 0, name: Tesla V100-DGXS-32GB, pci bus id: 0000:07:00.0, compute capability: 7.0
+2025-11-17 21:29:06.145548: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1886] Created device /job:localhost/replica:0/task:0/device:GPU:1 with 30564 MB memory:  -> device: 1, name: Tesla V100-DGXS-32GB, pci bus id: 0000:08:00.0, compute capability: 7.0
+2025-11-17 21:29:06.146108: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1886] Created device /job:localhost/replica:0/task:0/device:GPU:2 with 1473 MB memory:  -> device: 2, name: Tesla V100-DGXS-32GB, pci bus id: 0000:0e:00.0, compute capability: 7.0
+2025-11-17 21:29:06.146657: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1886] Created device /job:localhost/replica:0/task:0/device:GPU:3 with 1473 MB memory:  -> device: 3, name: Tesla V100-DGXS-32GB, pci bus id: 0000:0f:00.0, compute capability: 7.0
+Error setting GPU memory growth: Physical devices cannot be modified after being initialized
+Re-created existing directory: output/md_test_bcq.
+Loading data from:  training_data/hqcd
+Loading percentage:  90
+With test ratio of:  0.1
+CLASS LABELS: {'bb': 0, 'cc': 1, 'qq': 2, 'background': 3}
+Before: 2284969.0
+Majority class: 3 count = 2284969.0
+[ 258665 2101757 2282133 ...  780042  895465 1473923]
+(360486,)
+After: 235377.0
+Majority class: 3 count = 254069.0
+[136783   2283  41384 ... 180119 224483 242335]
+(44992,)
+(360486, 32, 16)
+(44992, 32, 16)
+set1: (32, 16)
+Test data saved to output/md_test_bcq
+y_train shape: (360486, 4)
+type(y_train): <class 'numpy.ndarray'>
+reco_pt_train shape: (360486,)
+Y_DIST: [ 71938. 235377.  30322.  22849.]
+Y_1: [1. 0. 0. 0.]
+y_train shape: (360486, 4)
+reco_pt_train shape: (360486,)
+y_train shape: (360486, 4)
+type(y_train): <class 'numpy.ndarray'>
+reco_pt_train shape: (360486,)
+DEBUG - Checking jets weighted by sample_weights as a function of pT:
+(array([71938.]), array([ 0., inf]))
+DEBUG - Checking jets weighted by sample_weights as a function of pT:
+(array([71937.99999996]), array([ 0., inf]))
+DEBUG - Checking jets weighted by sample_weights as a function of pT:
+(array([71938.00000001]), array([ 0., inf]))
+DEBUG - Checking jets weighted by sample_weights as a function of pT:
+(array([71937.99999997]), array([ 0., inf]))
+DEBUG - Checking sample_weight:
+[1.25276627 1.25276627 2.97214893 ... 0.3828815  0.3828815  0.3828815 ]
+Traceback (most recent call last):
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/train/train.py", line 651, in <module>
+    train(model, dataset, args, labels_to_use, yaml_dict)
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/train/train.py", line 577, in train
+    model.build_model(input_shape, output_shape)
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/model/TransformerModel.py", line 59, in build_model
+    for i, nodes in enumerate(self.model_config['emb_layers']):
+                              ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+KeyError: 'emb_layers'
+XIO:  fatal IO error 111 (Connection refused) on X server "localhost:10.0"
+      after 393 requests (390 known processed) with 2 events remaining.

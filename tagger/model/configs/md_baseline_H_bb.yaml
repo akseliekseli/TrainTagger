@@ -11,15 +11,16 @@ labels:
   background: [QCD_others]
 
 pt_regress: True
+hyperparameter_opt: False
 
 model_config:
   name: fatjet_md
-  conv1d_layers: [64, 64, 64, 64]
+  conv1d_layers: [32, 64, 64, 64]
   classification_layers: [32, 32]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
   aggregator: "mean"
-  beta: 1.1e-5
+  #beta: 1.1e-5
 
 quantization_config:
   quantizer_bits: 16
@@ -28,13 +29,13 @@ quantization_config:
   pt_output_quantization: [16, 6]
 
 training_config:
-  weight_method: "onlyclass"
-  epochs: 600
-  batch_size: 256
-  learning_rate: 0.00001
+  weight_method: "none"
+  epochs: 400
+  batch_size: 32
+  learning_rate: 0.006653437537446225
   validation_split: 0.1
 
-  loss_weights: [1, 0.1]
+  loss_weights: [1, 1]
 
   initial_sparsity: 0.0
   final_sparsity: 0.0
@@ -42,7 +43,7 @@ training_config:
   EarlyStopping_patience: 20
 
   ReduceLROnPlateau_factor: 0.5
-  ReduceLROnPlateau_patience: 10
+  ReduceLROnPlateau_patience: 5
   ReduceLROnPlateau_min_lr: 0.0000001
 
 hls4ml_config:

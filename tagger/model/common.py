@@ -143,7 +143,7 @@ def choose_aggregator(choice: str, name: str, bits=9, bits_int=2, alpha_val=1, *
         return AttentionPooling(name=name, bits=bits, bits_int=bits_int, alpha_val=alpha_val, **common_args)
 
 
-def fromYaml(yaml_path: str, folder: str, recreate: bool = True) -> JetTagModel:
+def fromYaml(yaml_path, yaml_dict: dict, folder: str, recreate: bool = True) -> JetTagModel:
     """Create a model directly from a yaml input file
 
     Args:
@@ -155,12 +155,12 @@ def fromYaml(yaml_path: str, folder: str, recreate: bool = True) -> JetTagModel:
         JetTagModel: The model
     """
 
-    with open(yaml_path, 'r') as stream:
-        yaml_dict = yaml.safe_load(stream)
+    #with open(yaml_path, 'r') as stream:
+    #    yaml_dict = yaml.safe_load(stream)
     # Create a model based on what is specified in the yaml 'model' field
     # Model must be registered for this to function
     model = JetModelFactory.create_JetTagModel(yaml_dict['model'], folder)
-    model.load_yaml(yaml_path)
+    model.load_yaml(yaml_dict)
     if recreate:
         # Remove output dir if exists
         if os.path.exists(folder):
@@ -172,7 +172,7 @@ def fromYaml(yaml_path: str, folder: str, recreate: bool = True) -> JetTagModel:
     return model
 
 
-def fromFolder(save_path: str, newoutput_dir: str = "None") -> JetTagModel:
+def fromFolder(save_path: str, yaml_dict: dict, newoutput_dir: str = "None") -> JetTagModel:
     """Load a model from its save folder using the yaml file in the save folder
 
     Args:
@@ -193,6 +193,6 @@ def fromFolder(save_path: str, newoutput_dir: str = "None") -> JetTagModel:
         if file.endswith(".yaml"):
             yaml_path = os.path.join(folder, file)
 
-    model = fromYaml(yaml_path, folder, recreate=recreate)
+    model = fromYaml(yaml_path, yaml_dict, folder, recreate=recreate)
     model.load(folder)
     return model

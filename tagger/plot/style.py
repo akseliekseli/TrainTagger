@@ -22,7 +22,7 @@ LINESTYLES = [
     (0, (3, 10, 1, 10, 1, 10)),
 ]
 
-color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
 SMALL_SIZE = 25
 MEDIUM_SIZE = 28
@@ -38,7 +38,7 @@ CMSHEADER_LEFT = "Phase 2 Simulation Preliminary"
 CMSHEADER_RIGHT = "14 TeV, 200 PU"
 CMSHEADER_SIZE = BIGGER_SIZE
 
-#CLASS_LABEL_STYLE = {
+# CLASS_LABEL_STYLE = {
 #    'b': 'b',
 #    'charm': 'c',
 #    'light': 'light',
@@ -52,7 +52,7 @@ CMSHEADER_SIZE = BIGGER_SIZE
 #    "taus": "Taus",
 #    "jets": "Jets (b, c, light, gluon)",
 #    "leptons": "Leptons (muon, electron)",
-#}
+# }
 CLASS_LABEL_STYLE = {
     # Existing ones
     "b": "b",
@@ -77,7 +77,6 @@ CLASS_LABEL_STYLE = {
     "taus": "Taus",
     "jets": "Jets (b, charm, light, gluon)",
     "leptons": "Leptons (muon, electron)",
-
     "H_bb": "$H_{bb}$",
     "H_cc": "$H_{cc}$",
     "H_ee": "$H_{ee}$",
@@ -89,9 +88,7 @@ CLASS_LABEL_STYLE = {
     "H_tauhtauh": "$H_{\\tau_h\\tau_h}$",
     "H_tauhtaum": "$H_{\\tau_h\\tau_\\mu}$",
     "Hext_aa": "$H_{\\gamma\\gamma}^{ext}$",
-
     "QCD_others": "QCD others",
-
     "Top_Wcs": "$t_{Wcs}$",
     "Top_Wev": "$t_{We\\nu}$",
     "Top_Wmv": "$t_{W\\mu\\nu}$",
@@ -110,7 +107,6 @@ CLASS_LABEL_STYLE = {
     "Top_bWtauhv": "$t_{bW\\tau_h\\nu}$",
     "Top_bWtaumv": "$t_{bW\\tau_\\mu\\nu}$",
     "background": "background",
-
     "W_ev": "$W_{e\\nu}$",
     "W_mv": "$W_{\\mu\\nu}$",
     "W_qq": "$W_{qq}$",
@@ -120,30 +116,31 @@ CLASS_LABEL_STYLE = {
     "bb": "bb",
     "cc": "cc",
     "qq": "qq",
+    "tau": "tau",
 }
 
 
 INPUT_FEATURE_STYLE = {
-    'pt': '$p_T$',
-    'pt_rel': 'relative $p_T$',
-    'pt_log': '$log(p_T)$',
-    'deta': '$\\Delta\\eta$',
-    'dphi': '$\\Delta\\phi$',
-    'mass': 'mass',
-    'isPhoton': 'PID: photon',
-    'isElectronPlus': 'PID: electron +',
-    'isElectronMinus': 'PID: electron -',
-    'isMuonPlus': 'PID: muon +',
-    'isMuonMinus': 'PID: muon -',
-    'isNeutralHadron': 'PID: hadron neutral',
-    'isChargedHadronPlus': 'PID: hadron +',
-    'isChargedHadronMinus': 'PID: hadron -',
-    'z0': '$z_0$',
-    'dxy': '$d_{xy}$',
-    'isfilled': 'record filled',
-    'puppiweight': 'PUPPI Weight',
-    'quality': 'Track Quality',
-    'emid': 'ElectroMagnetic ID',
+    "pt": "$p_T$",
+    "pt_rel": "relative $p_T$",
+    "pt_log": "$log(p_T)$",
+    "deta": "$\\Delta\\eta$",
+    "dphi": "$\\Delta\\phi$",
+    "mass": "mass",
+    "isPhoton": "PID: photon",
+    "isElectronPlus": "PID: electron +",
+    "isElectronMinus": "PID: electron -",
+    "isMuonPlus": "PID: muon +",
+    "isMuonMinus": "PID: muon -",
+    "isNeutralHadron": "PID: hadron neutral",
+    "isChargedHadronPlus": "PID: hadron +",
+    "isChargedHadronMinus": "PID: hadron -",
+    "z0": "$z_0$",
+    "dxy": "$d_{xy}$",
+    "isfilled": "record filled",
+    "puppiweight": "PUPPI Weight",
+    "quality": "Track Quality",
+    "emid": "ElectroMagnetic ID",
 }
 
 
@@ -153,28 +150,28 @@ def set_style():
     hep.cms.text("Simulation")
     plt.style.use(hep.style.CMS)
 
-    plt.rc('font', size=SMALL_SIZE)  # controls default text sizes
-    plt.rc('axes', titlesize=BIGGER_SIZE)  # fontsize of the axes title
-    plt.rc('axes', labelsize=BIGGER_SIZE + 5)  # fontsize of the x and y labels
-    plt.rc('axes', linewidth=LINEWIDTH + 2)  # thickness of axes
-    plt.rc('xtick', labelsize=MEDIUM_SIZE)  # fontsize of the tick labels
-    plt.rc('ytick', labelsize=MEDIUM_SIZE)  # fontsize of the tick labels
-    plt.rc('legend', fontsize=SMALL_SIZE - 2)  # legend fontsize
-    plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+    plt.rc("font", size=SMALL_SIZE)  # controls default text sizes
+    plt.rc("axes", titlesize=BIGGER_SIZE)  # fontsize of the axes title
+    plt.rc("axes", labelsize=BIGGER_SIZE + 5)  # fontsize of the x and y labels
+    plt.rc("axes", linewidth=LINEWIDTH + 2)  # thickness of axes
+    plt.rc("xtick", labelsize=MEDIUM_SIZE)  # fontsize of the tick labels
+    plt.rc("ytick", labelsize=MEDIUM_SIZE)  # fontsize of the tick labels
+    plt.rc("legend", fontsize=SMALL_SIZE - 2)  # legend fontsize
+    plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
     # line thickness
     import matplotlib as mpl
 
-    mpl.rcParams['lines.linewidth'] = 5
+    mpl.rcParams["lines.linewidth"] = 5
 
     import matplotlib
 
-    matplotlib.rcParams['xtick.major.size'] = 20
-    matplotlib.rcParams['xtick.major.width'] = 5
-    matplotlib.rcParams['xtick.minor.size'] = 10
-    matplotlib.rcParams['xtick.minor.width'] = 4
+    matplotlib.rcParams["xtick.major.size"] = 20
+    matplotlib.rcParams["xtick.major.width"] = 5
+    matplotlib.rcParams["xtick.minor.size"] = 10
+    matplotlib.rcParams["xtick.minor.width"] = 4
 
-    matplotlib.rcParams['ytick.major.size'] = 20
-    matplotlib.rcParams['ytick.major.width'] = 5
-    matplotlib.rcParams['ytick.minor.size'] = 10
-    matplotlib.rcParams['ytick.minor.width'] = 4
+    matplotlib.rcParams["ytick.major.size"] = 20
+    matplotlib.rcParams["ytick.major.width"] = 5
+    matplotlib.rcParams["ytick.minor.size"] = 10
+    matplotlib.rcParams["ytick.minor.width"] = 4

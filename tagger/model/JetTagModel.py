@@ -49,15 +49,15 @@ class JetTagModel(ABC):
 
         self.history = None
 
-    def load_yaml(self, yaml_path: str):
+    def load_yaml(self, yaml_dict: dict):
         """Load config dictionaries
 
         Args:
             yaml_path (str): Path to yaml file
         """
 
-        with open(yaml_path, 'r') as stream:
-            yaml_dict = yaml.safe_load(stream)
+        #with open(yaml_path, 'r') as stream:
+        #    yaml_dict = yaml.safe_load(stream)
         self.run_config = yaml_dict['run_config']
         self.model_config = yaml_dict['model_config']
         self.quantization_config = yaml_dict['quantization_config']

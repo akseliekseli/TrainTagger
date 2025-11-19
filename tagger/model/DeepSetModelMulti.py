@@ -36,8 +36,8 @@ tf.keras.utils.set_random_seed(420)  # not a special number
 
 
 # Register the model in the factory with the string name corresponding to what is in the yaml config
-@JetModelFactory.register("DeepSetModel")
-class DeepSetModel(JetTagModel):
+@JetModelFactory.register("DeepSetModelMulti")
+class DeepSetModelMulti(JetTagModel):
     """DeepSetModel class
 
     Args:
@@ -130,7 +130,7 @@ class DeepSetModel(JetTagModel):
         jet_id = QDense(
             outputs_shape[0], name="Dense_" + str(iclass + 2) + "_jetID", **common_args
         )(jet_id)
-        jet_id = Activation("softmax", name="jet_id_output")(jet_id)
+        jet_id = Activation("sigmoid", name="jet_id_output")(jet_id)
 
         # Make fully connected dense layers for pt regression task
         for ireg, depthreg in enumerate(self.model_config["regression_layers"]):
@@ -235,7 +235,7 @@ class DeepSetModel(JetTagModel):
                 learning_rate=self.training_config["learning_rate"]
             ),
             loss={
-                self.loss_name + self.output_id_name: "categorical_crossentropy",
+                self.loss_name + self.output_id_name: "binary_crossentropy",
                 self.loss_name + self.output_pt_name: tf.keras.losses.Huber(),
             },
             loss_weights=self.training_config["loss_weights"],

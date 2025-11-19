@@ -1,0 +1,54 @@
+model: DeepSetModel
+run_config:
+  verbose: 2
+  debug: True
+
+data: "training_data/baseline_hardware_inputs"
+labels:
+  bb: [H_bb, W_bb]
+  cc: [H_cc]
+  qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
+  background: [QCD_others]
+
+pt_regress: True
+hyperparameter_opt: False
+
+model_config:
+  name: fatjet_md
+  conv1d_layers: [64, 64]
+  classification_layers: [32, 32]
+  regression_layers: [10]
+  kernel_initializer: "lecun_uniform"
+  aggregator: "mean"
+  #beta: 1.1e-5
+
+quantization_config:
+  quantizer_bits: 16
+  quantizer_bits_int: 2
+  quantizer_alpha_val: 1
+  pt_output_quantization: [16, 6]
+
+training_config:
+  weight_method: "none"
+  epochs: 400
+  batch_size: 128
+  learning_rate: 0.000035322
+  validation_split: 0.1
+
+  loss_weights: [1, 0.05]
+
+  initial_sparsity: 0.0
+  final_sparsity: 0.0
+
+  EarlyStopping_patience: 35
+
+  ReduceLROnPlateau_factor: 0.5
+  ReduceLROnPlateau_patience: 10
+  ReduceLROnPlateau_min_lr: 0.0000001
+
+hls4ml_config:
+  input_precision: "ap_fixed<24,12,AP_RND,AP_SAT>"
+  class_precision: "ap_ufixed<24,12,AP_RND,AP_SAT>"
+  reg_precision: "ap_fixed<16,6,AP_RND,AP_SAT>"
+
+  project_name: "fatjet_md"

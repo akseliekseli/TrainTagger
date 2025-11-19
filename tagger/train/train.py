@@ -1,11 +1,17 @@
 import matplotlib.pyplot as plt
 import os
 from argparse import ArgumentParser
+import copy
 
 # Third parties
 import numpy as np
 import yaml
 import tensorflow as tf
+
+# Enable GPU usage and avoid TF pre-allocating all memory
+gpus = tf.config.list_physical_devices("GPU")
+tf.config.set_visible_devices(gpus[2:], "GPU")
+import optuna
 
 # Import from other modules
 from tagger.data.tools import load_data, to_ML
@@ -13,13 +19,6 @@ from tagger.model.common import fromFolder, fromYaml
 from tagger.plot.basic import basic
 
 
-# Silence some TF warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
-"""
-# Enable GPU usage and avoid TF pre-allocating all memory
-gpus = tf.config.list_physical_devices('GPU')
-tf.config.set_visible_devices(gpus[2:], 'GPU')  # Only first 2 GPUs
 if gpus:
     try:
         for gpu in gpus:
@@ -29,14 +28,18 @@ if gpus:
         print("Error setting GPU memory growth:", e)
 else:
     print("No GPUs detected, running on CPU.")
-"""
+# Silence some TF warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 """
 def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
     use_jets = True
     os.makedirs(os.path.join(out_dir, 'testing_data'), exist_ok=True)
     if use_jets:
-        np.save(os.path.join(out_dir, "testing_data/X_test_constits.npy"), X_test[0])
-        np.save(os.path.join(out_dir, "testing_data/X_test_jets.npy"), X_test[1])
+        np.save(os.path.join(
+            out_dir, "testing_data/X_test_constits.npy"), X_test[0])
+        np.save(os.path.join(
+            out_dir, "testing_data/X_test_jets.npy"), X_test[1])
     else:
         np.save(os.path.join(out_dir, "testing_data/X_test_constits.npy"), X_test)
     #np.save(os.path.join(out_dir, "testing_data/X_test.npy"), X_test)
@@ -209,7 +212,12 @@ def plot_deta_dphi(X_train, y_train, feat_x=1, feat_y=2):
 
     # Save and show
     plt.savefig("deta_dphi_scatter.png", dpi=200, bbox_inches="tight")
-    plt.show()
+    # plt.show()
+
+    plt.clf()
+
+    plt.hist(X_train[:, :, 5])
+    plt.savefig("mass.png", dpi=200, bbox_inches="tight")
 
 
 def normalize(X_train):
@@ -237,16 +245,92 @@ def undersample_per_class(y, n_per_class=5, seed=42):
     return np.array(selected_indices)
 
 
-def train(model, data, out_dir, percent, labels_to_use):
+def objective(trial, data, yaml_path, yaml_dict, out_dir):
+    (
+        X_train,
+        y_train,
+        pt_target_train,
+        sample_weight,
+        input_vars,
+        extra_vars,
+        class_labels,
+        input_shape,
+        output_shape,
+    ) = data
+
+    config = copy.deepcopy(yaml_dict)
+
+    # --- update hyperparameters dynamically ---
+    config["training_config"]["learning_rate"] = trial.suggest_float(
+        "learning_rate", 1e-5, 1e-2, log=True
+    )
+    config["training_config"]["batch_size"] = trial.suggest_categorical(
+        "batch_size", [256, 512, 1024]
+    )
+    config["training_config"]["epochs"] = trial.suggest_int(
+        "epochs", 100, 600, step=100
+    )
+    config["model_config"]["conv1d_layers"][0] = trial.suggest_int(
+        "conv1d_1", 32, 128, step=32
+    )
+    config["model_config"]["conv1d_layers"][1] = trial.suggest_int(
+        "conv1d_2", 32, 128, step=32
+    )
+    config["model_config"]["conv1d_layers"][2] = trial.suggest_int(
+        "conv1d_3", 32, 128, step=32
+    )
+
+    # --- Update patience settings ---
+    config["training_config"]["EarlyStopping_patience"] = trial.suggest_int(
+        "EarlyStopping_patience", 5, 10, step=1
+    )
+    config["training_config"]["ReduceLROnPlateau_patience"] = trial.suggest_int(
+        "ReduceLROnPlateau_patience", 5, 30, step=5
+    )
+
+    model = fromYaml(yaml_path, config, out_dir)
+    model.set_labels(
+        input_vars,
+        extra_vars,
+        class_labels,
+    )
+    model.build_model(input_shape, output_shape)
+    # Train it with a pruned model
+    num_samples = X_train.shape[0] * (1 - model.training_config["validation_split"])
+    model.compile_model(num_samples)
+    model.fit(X_train, y_train, pt_target_train, sample_weight)
+    history = model.history
+    val_accuracy = max(
+        history.history[
+            "val_prune_low_magnitude_jet_id_output_weighted_categorical_accuracy"
+        ]
+    )
+
+    return 1 - val_accuracy
+
+
+def hyperparameter_opt(yaml_path, config, data, out_dir):
+    study = optuna.create_study(direction="minimize")
+    study.optimize(
+        lambda trial: objective(trial, data, yaml_path, config, out_dir), n_trials=30
+    )
+    best_trial = study.best_trial
+    print(f"best_trial: {best_trial}")
+    return
+
+
+def train(model, data, args, labels_to_use, config):
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
+    out_dir = args.output
     data_train, data_test, class_labels, input_vars, extra_vars = load_data(
-        data, percentage=percent
+        data, percentage=args.percent
     )
 
     """
     # Use only labels spesified in the config file
-    if labels_to_use != 'all': 
-        class_labels = {k: v for k, v in class_labels.items() if k in labels_to_use}
+    if labels_to_use != 'all':
+        class_labels = {k: v for k, v in class_labels.items()
+                                                            if k in labels_to_use}
         class_labels = {k: i for i, k in enumerate(class_labels.keys())}
     """
 
@@ -254,8 +338,6 @@ def train(model, data, out_dir, percent, labels_to_use):
     X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train, _ = to_ML(
         data_train, class_labels, labels_to_use
     )
-
-    # Save X_test, y_test, and truth_pt_test for plotting later
     X_test, y_test, _, truth_pt_test, reco_pt_test, class_labels = to_ML(
         data_test, class_labels, labels_to_use
     )
@@ -309,19 +391,16 @@ def train(model, data, out_dir, percent, labels_to_use):
         return new_idx
 
     print("Before:", y_train.sum(axis=0)[np.argmax(y_train.sum(axis=0))])
-    """
-    new_idx = undersample_majority_class(X_train, y_train, keep_frac=0.01)
+    new_idx = undersample_majority_class(X_train, y_train, keep_frac=0.2)
     y_train = y_train[new_idx]
     reco_pt_train = reco_pt_train[new_idx]
     X_train = tuple(x[new_idx] for x in X_train)
     print("After:", y_train.sum(axis=0)[np.argmax(y_train.sum(axis=0))])
 
-    new_idx = undersample_majority_class(X_test, y_test, keep_frac=0.03)
+    new_idx = undersample_majority_class(X_test, y_test, keep_frac=0.2)
     y_test = y_test[new_idx]
     reco_pt_test = reco_pt_test[new_idx]
     X_test = tuple(x[new_idx] for x in X_test)
-    """
-
     # Get input shape
     use_jets = True
     if use_jets:
@@ -344,11 +423,98 @@ def train(model, data, out_dir, percent, labels_to_use):
 
     X_train = X_train_constits
     X_test = X_test
+    '''
+    # Check for multi-label rows (more than one "1" per sample)
+    invalid_rows = np.where(y_train.sum(axis=1) > 1)[0]
+    num_invalid = len(invalid_rows)
+
+    # Check for samples missing a label (all zeros)
+    missing_rows = np.where(y_train.sum(axis=1) == 0)[0]
+    num_missing = len(missing_rows)
+
+    print(X_train.shape)
+    # Check input/label length consistency
+    if len(X_train) != len(y_train):
+        print(
+            f" Mismatch: X_train has {len(X_train)} entries, y_train has",
+            f"{len(y_train)}.",
+        )
+
+    # Report label anomalies
+    if num_invalid > 0:
+        print(
+            f"⚠️ Found {num_invalid}",
+            "samples with multiple active labels (multi-label rows).",
+        )
+        print(f"Example indices: {invalid_rows[:10]}")
+    else:
+        print("✅ All rows have a single active label.")
+
+    if num_missing > 0:
+        print(f"⚠️ Found {num_missing}",
+              "samples with no active label (all zeros).")
+        print(f"Example indices: {missing_rows[:10]}")
+    
+    # Flatten each jet to a 1D vector
+    X_flat = X_train.reshape(X_train.shape[0], -1)
+
+    # Find unique rows and their counts
+    unique_X, unique_indices, counts = np.unique(
+        X_flat, axis=0, return_index=True, return_counts=True
+    )
+
+    # Find duplicate indices (jets that appear more than once)
+    duplicate_indices = np.where(counts > 1)[0]
+
+    if len(duplicate_indices) > 0:
+        print(
+            f"Found {len(duplicate_indices)} duplicated jets out of",
+            f"{len(X_train)} total.",
+        )
+        print(
+            "Indices of duplicates (first occurrences):",
+            unique_indices[duplicate_indices],
+        )
+    else:
+        print("No duplicate jets found.")
+
+    def check_shifted_duplicates(X_train, max_shift=5, tol=1e-8):
+        """Detect jets that are identical up to a shift along the constituent axis."""
+        n_jets = X_train.shape[0]
+        shifted_pairs = []
+
+        for i in range(n_jets):
+            for j in range(i + 1, n_jets):
+                for shift in range(1, max_shift + 1):
+                    # compare forward shift
+                    if np.allclose(
+                        X_train[i, :-shift, :], X_train[j, shift:, :], atol=tol
+                    ):
+                        shifted_pairs.append((i, j, shift, "forward"))
+                        break
+                    # compare backward shift
+                    if np.allclose(
+                        X_train[i, shift:, :], X_train[j, :-shift, :], atol=tol
+                    ):
+                        shifted_pairs.append((i, j, shift, "backward"))
+                        break
+        return shifted_pairs
+
+    # Example use
+    shifted = check_shifted_duplicates(X_train, max_shift=5)
+    if shifted:
+        for a, b, shift, direction in shifted:
+            print(f"Jets {a} and {b} match with a",
+                  f"{direction} shift of {shift}")
+    else:
+        print("No shifted duplicates found.")
+    '''
 
     X_train = normalize(X_train)
     X_test_features, X_test_labels = X_test
     X_test = (normalize(X_test_features), X_test_labels)
 
+    """
     idx = undersample_per_class(y_train, n_per_class=5000)
     X_train, y_train, pt_target_train, reco_pt_train = (
         X_train[idx, :, :],
@@ -364,7 +530,7 @@ def train(model, data, out_dir, percent, labels_to_use):
         truth_pt_test[idx],
         reco_pt_test[idx],
     )
-
+    """
     plot_deta_dphi(X_train, y_train, feat_x=3, feat_y=4)
 
     save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
@@ -390,6 +556,25 @@ def train(model, data, out_dir, percent, labels_to_use):
     input_shape = X_train.shape[1:]  # First dimension is batch size
     output_shape = y_train.shape[1:]
 
+    if config["hyperparameter_opt"]:
+        hyperparameter_opt(
+            args.yaml_config,
+            yaml_dict,
+            (
+                X_train,
+                y_train,
+                pt_target_train,
+                sample_weight,
+                input_vars,
+                extra_vars,
+                class_labels,
+                input_shape,
+                output_shape,
+            ),
+            out_dir,
+        )
+
+        return
     model.build_model(input_shape, output_shape)
     # Train it with a pruned model
     num_samples = X_train.shape[0] * (1 - model.training_config["validation_split"])
@@ -449,7 +634,7 @@ if __name__ == "__main__":
 
     if args.plot_basic:
         # All the basic plots!
-        model = fromFolder(args.output)
+        model = fromFolder(args.output, yaml_dict)
         results = basic(model, args.signal_processes, yaml_dict["pt_regress"])
         # if os.path.isfile("mlflow_run_id.txt"):
         #     f = open("mlflow_run_id.txt", "r")
@@ -463,8 +648,8 @@ if __name__ == "__main__":
         #             mlflow.log_metric(class_label + ' ROC AUC',results[class_label])
 
     else:
-        model = fromYaml(args.yaml_config, args.output)
-        train(model, dataset, args.output, args.percent, labels_to_use)
+        model = fromYaml(args.yaml_config, yaml_dict, args.output)
+        train(model, dataset, args, labels_to_use, yaml_dict)
         # with mlflow.start_run(run_name=args.name) as run:
         #     mlflow.set_tag('gitlab.CI_JOB_ID', os.getenv('CI_JOB_ID'))
         #     mlflow.keras.autolog()

@@ -46,7 +46,8 @@ def _add_response_vars(data):
 
 def _define_target(data, all_labels: None):
     """
-    Splits data by particle flavor and applies conditions for each category. Also creates the pT target.
+    Splits data by particle flavor and applies conditions for each category.
+    Also creates the pT target.
 
     Parameters:
         data (awkward array): The input data to split.
@@ -83,6 +84,10 @@ def _define_target(data, all_labels: None):
     for i, jet in enumerate(data["fj_label"]):
         jet_labels = ak.to_list(jet)
         jet_labels = list(set(jet_labels))
+        if len(jet_labels) >= 2:
+            print(f"DUPLICATE LABELS: {jet_labels}")
+        else:
+            print(f"only one label {jet_labels}")
         # Fill one-hot
         for lbl in jet_labels:
             if lbl in class_labels:
@@ -90,6 +95,7 @@ def _define_target(data, all_labels: None):
                 labels[i, idx] = 1.0
             else:
                 print(f"Warning: unknown label {lbl}")
+    print(labels)
     data = ak.with_field(data, labels, "class_label")
 
     data = ak.with_field(data, labels, "class_label")
@@ -519,10 +525,13 @@ def to_ML(data, class_labels, combined_mapping=None):
     keepExtras = False
     use_jets = True
 
+    mask = ak.any(data["nn_inputs"][:, :, 5] > 0, axis=1)
+    data = data[mask]
+
     constit_data = (
         np.asarray(data["nn_inputs"])
         if keepExtras
-        else np.asarray(data["nn_inputs"])[:, :, :-4]
+        else np.asarray(data["nn_inputs"])[:, :, :]  # -4
     )
     constit_feats = constit_data[:, :, :]
 
@@ -655,7 +664,9 @@ def make_data(
     # Check if output dir already exists, remove if so
     if os.path.exists(outdir):
         confirm = input(
-            f"The directory '{outdir}' already exists. Do you want to delete it and continue? [y/n]: "
+            f"""The directory '{
+                outdir
+            }' already exists. Do you want to delete it and continue? [y/n]: """
         )
         if confirm.lower() == "y":
             shutil.rmtree(outdir)
@@ -692,6 +703,7 @@ def make_data(
             (data["jet_pt_phys"] > 15)
             & (np.abs(data["jet_eta_phys"]) < 2.4)
             & (data["jet_reject"] == 0)
+            # & (data["mass"] > 0)
         )
         data = data[jet_cut]
 
@@ -718,7 +730,9 @@ def make_data(
         # Number of chunk for indexing files
         chunk += 1
         print(
-            f"Processed {num_entries_done}/{num_entries} entries | {np.round(num_entries_done / num_entries * 100, 1)}%"
+            f"""Processed {num_entries_done}/{num_entries} entries | {
+                np.round(num_entries_done / num_entries * 100, 1)
+            }%"""
         )
         if num_entries_done / num_entries >= ratio:
             break

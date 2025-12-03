@@ -1,4 +1,4 @@
-model: DeepSetModel
+model: CascadeModel
 run_config:
   verbose: 2
   debug: True
@@ -15,8 +15,8 @@ hyperparameter_opt: False
 
 model_config:
   name: fatjet_md
-  conv1d_layers: [64, 256, 256]
-  classification_layers: [64, 32]
+  conv1d_layers: [64, 256, 256, 256]
+  classification_layers: [64, 64]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
   aggregator: "max"
@@ -32,7 +32,7 @@ training_config:
   weight_method: "onlyclass"
   epochs: 600
   batch_size: 4
-  learning_rate: 0.000035322
+  learning_rate: 0.0000035322
   validation_split: 0.1
 
   loss_weights: [1, 0.05]

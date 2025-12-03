@@ -107,6 +107,7 @@ CLASS_LABEL_STYLE = {
     "Top_bWtauhv": "$t_{bW\\tau_h\\nu}$",
     "Top_bWtaumv": "$t_{bW\\tau_\\mu\\nu}$",
     "background": "background",
+    "W_bb": "$W_{bb}$",
     "W_ev": "$W_{e\\nu}$",
     "W_mv": "$W_{\\mu\\nu}$",
     "W_qq": "$W_{qq}$",

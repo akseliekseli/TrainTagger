@@ -8,6 +8,14 @@ import numpy as np
 import yaml
 import tensorflow as tf
 
+num_threads = 5
+os.environ["OMP_NUM_THREADS"] = "5"
+os.environ["TF_NUM_INTRAOP_THREADS"] = "5"
+os.environ["TF_NUM_INTEROP_THREADS"] = "5"
+
+tf.config.threading.set_inter_op_parallelism_threads(num_threads)
+tf.config.threading.set_intra_op_parallelism_threads(num_threads)
+tf.config.set_soft_device_placement(True)
 # Enable GPU usage and avoid TF pre-allocating all memory
 gpus = tf.config.list_physical_devices("GPU")
 tf.config.set_visible_devices(gpus[2:], "GPU")
@@ -21,7 +29,7 @@ from tagger.plot.basic import basic
 
 if gpus:
     try:
-        for gpu in gpus:
+        for gpu in tf.config.get_visible_devices("GPU"):
             tf.config.experimental.set_memory_growth(gpu, True)
         print(f"Using {len(gpus)} GPU(s): {[gpu.name for gpu in gpus]}")
     except RuntimeError as e:
@@ -265,10 +273,10 @@ def objective(trial, data, yaml_path, yaml_dict, out_dir):
         "learning_rate", 1e-5, 1e-2, log=True
     )
     config["training_config"]["batch_size"] = trial.suggest_categorical(
-        "batch_size", [256, 512, 1024]
+        "batch_size", [1024, 2048, 4096, 8192]
     )
     config["training_config"]["epochs"] = trial.suggest_int(
-        "epochs", 100, 600, step=100
+        "epochs", 100, 200, step=100
     )
     config["model_config"]["conv1d_layers"][0] = trial.suggest_int(
         "conv1d_1", 32, 128, step=32
@@ -312,7 +320,7 @@ def objective(trial, data, yaml_path, yaml_dict, out_dir):
 def hyperparameter_opt(yaml_path, config, data, out_dir):
     study = optuna.create_study(direction="minimize")
     study.optimize(
-        lambda trial: objective(trial, data, yaml_path, config, out_dir), n_trials=30
+        lambda trial: objective(trial, data, yaml_path, config, out_dir), n_trials=10
     )
     best_trial = study.best_trial
     print(f"best_trial: {best_trial}")
@@ -341,7 +349,6 @@ def train(model, data, args, labels_to_use, config):
     X_test, y_test, _, truth_pt_test, reco_pt_test, class_labels = to_ML(
         data_test, class_labels, labels_to_use
     )
-
     print(f"CLASS LABELS: {class_labels}")
 
     model.set_labels(
@@ -390,6 +397,7 @@ def train(model, data, args, labels_to_use, config):
 
         return new_idx
 
+    """
     print("Before:", y_train.sum(axis=0)[np.argmax(y_train.sum(axis=0))])
     new_idx = undersample_majority_class(X_train, y_train, keep_frac=0.2)
     y_train = y_train[new_idx]
@@ -401,6 +409,7 @@ def train(model, data, args, labels_to_use, config):
     y_test = y_test[new_idx]
     reco_pt_test = reco_pt_test[new_idx]
     X_test = tuple(x[new_idx] for x in X_test)
+    """
     # Get input shape
     use_jets = True
     if use_jets:
@@ -423,98 +432,17 @@ def train(model, data, args, labels_to_use, config):
 
     X_train = X_train_constits
     X_test = X_test
-    '''
-    # Check for multi-label rows (more than one "1" per sample)
-    invalid_rows = np.where(y_train.sum(axis=1) > 1)[0]
-    num_invalid = len(invalid_rows)
+    true_sizes = (X_train.any(axis=-1)).sum(axis=-1)
 
-    # Check for samples missing a label (all zeros)
-    missing_rows = np.where(y_train.sum(axis=1) == 0)[0]
-    num_missing = len(missing_rows)
+    plt.hist(true_sizes, bins="auto")
+    plt.xlabel("Set size")
+    plt.ylabel("Count")
+    plt.show()
+    plt.savefig("set_size_hist.png", dpi=300, bbox_inches="tight")
+    # X_train = normalize(X_train)
+    # X_test_features, X_test_labels = X_test
+    # X_test = (normalize(X_test_features), X_test_labels)
 
-    print(X_train.shape)
-    # Check input/label length consistency
-    if len(X_train) != len(y_train):
-        print(
-            f" Mismatch: X_train has {len(X_train)} entries, y_train has",
-            f"{len(y_train)}.",
-        )
-
-    # Report label anomalies
-    if num_invalid > 0:
-        print(
-            f"⚠️ Found {num_invalid}",
-            "samples with multiple active labels (multi-label rows).",
-        )
-        print(f"Example indices: {invalid_rows[:10]}")
-    else:
-        print("✅ All rows have a single active label.")
-
-    if num_missing > 0:
-        print(f"⚠️ Found {num_missing}",
-              "samples with no active label (all zeros).")
-        print(f"Example indices: {missing_rows[:10]}")
-    
-    # Flatten each jet to a 1D vector
-    X_flat = X_train.reshape(X_train.shape[0], -1)
-
-    # Find unique rows and their counts
-    unique_X, unique_indices, counts = np.unique(
-        X_flat, axis=0, return_index=True, return_counts=True
-    )
-
-    # Find duplicate indices (jets that appear more than once)
-    duplicate_indices = np.where(counts > 1)[0]
-
-    if len(duplicate_indices) > 0:
-        print(
-            f"Found {len(duplicate_indices)} duplicated jets out of",
-            f"{len(X_train)} total.",
-        )
-        print(
-            "Indices of duplicates (first occurrences):",
-            unique_indices[duplicate_indices],
-        )
-    else:
-        print("No duplicate jets found.")
-
-    def check_shifted_duplicates(X_train, max_shift=5, tol=1e-8):
-        """Detect jets that are identical up to a shift along the constituent axis."""
-        n_jets = X_train.shape[0]
-        shifted_pairs = []
-
-        for i in range(n_jets):
-            for j in range(i + 1, n_jets):
-                for shift in range(1, max_shift + 1):
-                    # compare forward shift
-                    if np.allclose(
-                        X_train[i, :-shift, :], X_train[j, shift:, :], atol=tol
-                    ):
-                        shifted_pairs.append((i, j, shift, "forward"))
-                        break
-                    # compare backward shift
-                    if np.allclose(
-                        X_train[i, shift:, :], X_train[j, :-shift, :], atol=tol
-                    ):
-                        shifted_pairs.append((i, j, shift, "backward"))
-                        break
-        return shifted_pairs
-
-    # Example use
-    shifted = check_shifted_duplicates(X_train, max_shift=5)
-    if shifted:
-        for a, b, shift, direction in shifted:
-            print(f"Jets {a} and {b} match with a",
-                  f"{direction} shift of {shift}")
-    else:
-        print("No shifted duplicates found.")
-    '''
-
-    X_train = normalize(X_train)
-    X_test_features, X_test_labels = X_test
-    X_test = (normalize(X_test_features), X_test_labels)
-
-    """
     idx = undersample_per_class(y_train, n_per_class=5000)
     X_train, y_train, pt_target_train, reco_pt_train = (
         X_train[idx, :, :],
@@ -523,15 +451,14 @@ def train(model, data, args, labels_to_use, config):
         reco_pt_train[idx],
     )
 
-    idx = undersample_per_class(y_test, n_per_class=1000)
+    idx = undersample_per_class(y_test, n_per_class=2000)
     X_test = (X_test[0][idx, :, :], X_test[1])
     y_test, truth_pt_test, reco_pt_test = (
         y_test[idx, :],
         truth_pt_test[idx],
         reco_pt_test[idx],
     )
-    """
-    plot_deta_dphi(X_train, y_train, feat_x=3, feat_y=4)
+    # plot_deta_dphi(X_train, y_train, feat_x=3, feat_y=4)
 
     save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
     print("y_train shape:", y_train.shape)

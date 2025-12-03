@@ -7,3 +7,4 @@ from tagger.model.DeepSetModelSGD import DeepSetModelSGD
 from tagger.model.TransformerFatJet import TransformerFatJet
 from tagger.model.DeepSetModelTagger import DeepSetModelTagger
 from tagger.model.DeepSetModelMulti import DeepSetModelMulti
+from tagger.model.CascadeModel import CascadeModel

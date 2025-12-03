@@ -60,3 +60,50 @@ Traceback (most recent call last):
 KeyError: 'emb_layers'
 XIO:  fatal IO error 111 (Connection refused) on X server "localhost:10.0"
       after 393 requests (390 known processed) with 2 events remaining.
+2025-11-19 14:11:00.370686: E tensorflow/compiler/xla/stream_executor/cuda/cuda_dnn.cc:9342] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+2025-11-19 14:11:00.370736: E tensorflow/compiler/xla/stream_executor/cuda/cuda_fft.cc:609] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+2025-11-19 14:11:00.370751: E tensorflow/compiler/xla/stream_executor/cuda/cuda_blas.cc:1518] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+2025-11-19 14:11:00.379532: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: SSE4.1 SSE4.2 AVX AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/requests/__init__.py:86: RequestsDependencyWarning: Unable to find acceptable character detection dependency (chardet or charset_normalizer).
+  warnings.warn(
+/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/calmjs/parse/utils.py:13: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import working_set
+Traceback (most recent call last):
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/train/train.py", line 18, in <module>
+    from tagger.model.common import fromFolder, fromYaml
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/model/__init__.py", line 2, in <module>
+    from tagger.model.DeepSetModel import DeepSetModel
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/model/DeepSetModel.py", line 23, in <module>
+    from tagger.model.common import AAtt, AttentionPooling, choose_aggregator
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/model/common.py", line 17, in <module>
+    from tagger.model.JetTagModel import JetModelFactory, JetTagModel
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/model/JetTagModel.py", line 15, in <module>
+    from tagger.plot.basic import loss_history
+  File "/home/akseli/ml4hlcms/TrainTagger/tagger/plot/basic.py", line 19, in <module>
+    import shap
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/shap/__init__.py", line 1, in <module>
+    from ._explanation import Cohorts, Explanation
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/shap/_explanation.py", line 16, in <module>
+    from .utils._clustering import hclust_ordering
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/shap/utils/__init__.py", line 1, in <module>
+    from ._clustering import (
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/shap/utils/_clustering.py", line 12, in <module>
+    from numba import njit
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/numba/__init__.py", line 73, in <module>
+    from numba.core import config
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/numba/core/config.py", line 17, in <module>
+    import llvmlite.binding as ll
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/llvmlite/binding/__init__.py", line 8, in <module>
+    from .module import *
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/llvmlite/binding/module.py", line 7, in <module>
+    from llvmlite.binding.value import ValueRef, TypeRef
+  File "/home/akseli/miniconda3/envs/tagger/lib/python3.11/site-packages/llvmlite/binding/value.py", line 7, in <module>
+    from llvmlite.binding.typeref import TypeRef
+  File "<frozen importlib._bootstrap>", line 1176, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1147, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 690, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 936, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1032, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1130, in get_data
+KeyboardInterrupt

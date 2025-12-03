@@ -1,13 +1,13 @@
-model: DeepSetModel
+model: DeepSetModelHGQ
 run_config:
   verbose: 2
   debug: True
 
-data: "training_data/all"
+data: "training_data/hqcd"
 labels:
-  bb: [H_bb, W_bb]
-  cc: [H_cc]
-  qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
+  bb: [H_bb, H_cc, H_qq]
+  #cc: [H_cc]
+  #qq: [H_qq]
   background: [QCD_others]
 
 pt_regress: True
@@ -15,12 +15,12 @@ hyperparameter_opt: False
 
 model_config:
   name: fatjet_md
-  conv1d_layers: [64, 256, 256]
-  classification_layers: [64, 32]
+  conv1d_layers: [32, 64]
+  classification_layers: [32, 32]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
   aggregator: "max"
-  #beta: 1.1e-5
+  beta: 1.1e-5
 
 quantization_config:
   quantizer_bits: 16
@@ -30,20 +30,20 @@ quantization_config:
 
 training_config:
   weight_method: "onlyclass"
-  epochs: 600
-  batch_size: 4
-  learning_rate: 0.000035322
+  epochs: 100
+  batch_size: 1024
+  learning_rate: 0.0018610790069758223
   validation_split: 0.1
 
-  loss_weights: [1, 0.05]
+  loss_weights: [1, 1]
 
   initial_sparsity: 0.0
-  final_sparsity: 0.0
+  final_sparsity: 0.1
 
   EarlyStopping_patience: 20
 
   ReduceLROnPlateau_factor: 0.5
-  ReduceLROnPlateau_patience: 10
+  ReduceLROnPlateau_patience: 5
   ReduceLROnPlateau_min_lr: 0.0000001
 
 hls4ml_config:

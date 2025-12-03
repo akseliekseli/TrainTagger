@@ -3,11 +3,11 @@ run_config:
   verbose: 2
   debug: True
 
-data: "training_data/hqcd/"
+data: "training_data/all/"
 labels:
-  bb: [H_bb] # W_bb
+  bb: [H_bb, W_bb]
   cc: [H_cc]
-  qq: [H_qq]
+  qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
   background: [QCD_others]
 
 pt_regress: True
@@ -15,9 +15,9 @@ hyperparameter_opt: False
 
 model_config:
   name: md_transformer
-  emb_layers: [32, 32]
-  transformer_layers: [[2, 16, 2, 32], [2, 16, 2, 32]] #num_heads, mha_hidden_dim, num_dense_layers, dim_dense_layers
-  classification_layers: [32, 16]
+  emb_layers: [64, 64]
+  transformer_layers: [[2, 16, 2, 64], [2, 16, 2, 64]] #num_heads, mha_hidden_dim, num_dense_layers, dim_dense_layers
+  classification_layers: [64, 32]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
 
@@ -26,8 +26,8 @@ quantization_config:
 training_config:
   weight_method: "onlyclass"
   epochs: 1000
-  batch_size: 64
-  learning_rate: 0.01
+  batch_size: 1024
+  learning_rate: 0.0001
   validation_split: 0.2
 
   loss_weights: [1, 0.1]

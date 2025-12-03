@@ -83,10 +83,12 @@ def _define_target(data, all_labels: None):
 
     for i, jet in enumerate(data["fj_label"]):
         jet_labels = ak.to_list(jet)
+        """
+        print(jet_labels)
         jet_labels = list(set(jet_labels))
-        if len(jet_labels) >= 2:
+         if len(jet_labels) >= 2:
             print(f"DUPLICATE LABELS: {jet_labels}")
-        else:
+         else:
             print(f"only one label {jet_labels}")
         # Fill one-hot
         for lbl in jet_labels:
@@ -95,6 +97,9 @@ def _define_target(data, all_labels: None):
                 labels[i, idx] = 1.0
             else:
                 print(f"Warning: unknown label {lbl}")
+        """
+        idx = class_labels[jet_labels]
+        labels[i, idx] = 1.0
     print(labels)
     data = ak.with_field(data, labels, "class_label")
 
@@ -531,7 +536,8 @@ def to_ML(data, class_labels, combined_mapping=None):
     constit_data = (
         np.asarray(data["nn_inputs"])
         if keepExtras
-        else np.asarray(data["nn_inputs"])[:, :, :]  # -4
+        # Remove mass column
+        else np.delete(np.asarray(data["nn_inputs"])[:, :, :-4], 5, axis=2)
     )
     constit_feats = constit_data[:, :, :]
 

@@ -1,42 +1,41 @@
 model: TransformerFatJet
-run_config :
-  verbose : 2
-  debug : True
+run_config:
+  verbose: 2
+  debug: True
 
-data: 'training_data/baseline_hardware_inputs/'
-labels: 
+data: "training_data/baseline_hardware_inputs/"
+labels:
   - H_qq
   - Top_Wqq
   - Top_bWqq
   - W_qq
 
-
-model_config :
-  name : transformer
-  emb_layers : [32,32]
-  transformer_layers : [[2,16,2,32],[2,16,2,32]] #num_heads, mha_hidden_dim, num_dense_layers, dim_dense_layers
-  classification_layers : [32,16]
-  regression_layers : [10]
-  kernel_initializer : 'lecun_uniform'
+model_config:
+  name: transformer
+  emb_layers: [32, 32]
+  transformer_layers: [[2, 16, 2, 32], [2, 16, 2, 32]] #num_heads, mha_hidden_dim, num_dense_layers, dim_dense_layers
+  classification_layers: [32, 16]
+  regression_layers: [10]
+  kernel_initializer: "lecun_uniform"
 
 quantization_config:
 
-training_config :
+training_config:
   weight_method: "onlyclass"
-  epochs : 5
-  batch_size : 4096
-  learning_rate : 0.01
-  validation_split : 0.1
+  epochs: 50
+  batch_size: 4096
+  learning_rate: 0.001
+  validation_split: 0.1
 
-  loss_weights : [1,1]
+  loss_weights: [1, 1]
 
-  initial_sparsity : 0.0
-  final_sparsity : 0.1
+  initial_sparsity: 0.0
+  final_sparsity: 0.1
 
-  EarlyStopping_patience : 10
+  EarlyStopping_patience: 10
 
-  ReduceLROnPlateau_factor : 0.5
-  ReduceLROnPlateau_patience : 5
-  ReduceLROnPlateau_min_lr : 0.0001
+  ReduceLROnPlateau_factor: 0.5
+  ReduceLROnPlateau_patience: 5
+  ReduceLROnPlateau_min_lr: 0.000001
 
 hls4ml_config:

@@ -3,23 +3,23 @@ run_config:
   verbose: 2
   debug: True
 
-data: "training_data/hqcd"
+data: "training_data/all/"
 labels:
-  bb: [H_bb]
+  bb: [H_bb, W_bb]
   cc: [H_cc]
-  #qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
-  background: [QCD_others]
+  qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
+  #background: [QCD_others]
 
 pt_regress: True
 hyperparameter_opt: False
 
 model_config:
   name: fatjet_md
-  conv1d_layers: [32, 64, 64]
+  conv1d_layers: [32, 128, 96]
   classification_layers: [32, 32]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
-  aggregator: "mean"
+  aggregator: "max"
   #beta: 1.1e-5
 
 quantization_config:
@@ -30,12 +30,12 @@ quantization_config:
 
 training_config:
   weight_method: "onlyclass"
-  epochs: 600
-  batch_size: 1024
-  learning_rate: 0.0001
+  epochs: 100
+  batch_size: 512
+  learning_rate: 0.0018610790069758223
   validation_split: 0.1
 
-  loss_weights: [1, 1]
+  loss_weights: [1, 0.1]
 
   initial_sparsity: 0.0
   final_sparsity: 0.0

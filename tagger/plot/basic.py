@@ -62,7 +62,8 @@ def loss_history(plot_dir, loss_names, history):
 
         save_path = os.path.join(plot_dir, "loss_" + metric + "_history")
         plt.savefig(f"{save_path}.png", bbox_inches="tight")
-        plt.savefig(f"{save_path}.pdf", bbox_inches="tight")
+        # .pdf doesn't update plot
+        # plt.savefig(f"{save_path}.pdf", bbox_inches="tight")
 
         fig.clf()
 
@@ -1081,7 +1082,9 @@ def basic(model, signal_dirs, plot_pt_regress=True):
     plot_input_vars(X_test, model.input_vars, plot_dir)
 
     # Plot inclusive response and individual flavor
-    # response(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
+    response(
+        model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir
+    )
 
     # Plot the rms of the residuals vs pt
     # rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)

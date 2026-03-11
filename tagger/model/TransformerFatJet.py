@@ -20,6 +20,7 @@ from tensorflow.keras.layers import (
 )
 
 from tagger.model.JetTagModel import JetModelFactory, JetTagModel
+from tagger.model.categorical_focal_loss import categorical_focal_loss
 
 # Set some tensorflow constants
 NUM_THREADS = 24
@@ -152,8 +153,7 @@ class TransformerFatJet(JetTagModel):
         )
 
         # Define the model using both branches
-        self.jet_model = tf.keras.Model(
-            inputs=inputs, outputs=[jet_id, pt_regress])
+        self.jet_model = tf.keras.Model(inputs=inputs, outputs=[jet_id, pt_regress])
 
         print(self.jet_model.summary())
 
@@ -177,13 +177,14 @@ class TransformerFatJet(JetTagModel):
             ),
         ]
 
+        focal = categorical_focal_loss(gamma=4.0, alpha=0.5)
         # compile the tensorflow model setting the loss and metrics
         self.jet_model.compile(
             optimizer=tf.keras.optimizers.Adam(
                 learning_rate=self.training_config["learning_rate"]
             ),
             loss={
-                self.loss_name + self.output_id_name: "categorical_crossentropy",
+                self.loss_name + self.output_id_name: focal,
                 self.loss_name + self.output_pt_name: tf.keras.losses.Huber(),
             },
             loss_weights=self.training_config["loss_weights"],

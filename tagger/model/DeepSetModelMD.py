@@ -60,8 +60,8 @@ def categorical_focal_loss(gamma=1.0, alpha=None):
 
 
 # Register the model in the factory with the string name corresponding to what is in the yaml config
-@JetModelFactory.register("DeepSetModel")
-class DeepSetModel(JetTagModel):
+@JetModelFactory.register("DeepSetModelMD")
+class DeepSetModelMD(JetTagModel):
     """DeepSetModel class
 
     Args:
@@ -255,7 +255,7 @@ class DeepSetModel(JetTagModel):
                 learning_rate=self.training_config["learning_rate"]
             ),
             loss={
-                self.loss_name + self.output_id_name: focal,
+                self.loss_name + self.output_id_name: "categorical_crossentropy",
                 self.loss_name + self.output_pt_name: tf.keras.losses.Huber(),
             },
             loss_weights=self.training_config["loss_weights"],

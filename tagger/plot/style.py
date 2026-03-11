@@ -107,7 +107,6 @@ CLASS_LABEL_STYLE = {
     "Top_bWtauhv": "$t_{bW\\tau_h\\nu}$",
     "Top_bWtaumv": "$t_{bW\\tau_\\mu\\nu}$",
     "background": "background",
-    "W_bb": "$W_{bb}$",
     "W_ev": "$W_{e\\nu}$",
     "W_mv": "$W_{\\mu\\nu}$",
     "W_qq": "$W_{qq}$",
@@ -118,6 +117,7 @@ CLASS_LABEL_STYLE = {
     "cc": "cc",
     "qq": "qq",
     "tau": "tau",
+    "sig": "sig",
 }
 
 
@@ -125,6 +125,9 @@ INPUT_FEATURE_STYLE = {
     "pt": "$p_T$",
     "pt_rel": "relative $p_T$",
     "pt_log": "$log(p_T)$",
+    "pt_rel_log": "$relative log(p_T)$",
+    "pt_rel_phys": "$relative phys pt$",
+    "pt_phys": "$phys pt$",
     "deta": "$\\Delta\\eta$",
     "dphi": "$\\Delta\\phi$",
     "mass": "mass",

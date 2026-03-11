@@ -9,6 +9,7 @@ import mplhep as hep
 
 # Third parties
 import pandas
+from tagger.plot.inspect_asra_data import inspect_asra_data
 import tensorflow as tf
 from matplotlib.pyplot import cm
 from scipy.stats import norm
@@ -35,6 +36,68 @@ np.bool = np.bool_
 style.set_style()
 
 # DEFINE ALL THE PLOTTING FUNCTIONS HERE!!!! THEY WILL BE CALLED IN basic() function >>>>>>>
+
+
+def loss_history_adversarial(plot_dir, loss_names, history):
+    # Create the figure once outside the loop
+    fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
+    hep.cms.label(
+        llabel=style.CMSHEADER_LEFT,
+        rlabel=style.CMSHEADER_RIGHT,
+        ax=ax,
+        fontsize=style.CMSHEADER_SIZE,
+    )
+
+    combined_metric_label = ""  # To label the combined plot
+
+    for metric_name_base in loss_names:
+        metric = metric_name_base  # Assuming the base name contains the full key
+
+        train_key = metric
+        val_key = "val_" + metric
+
+        # --- Start Custom Labeling Logic ---
+
+        # Determine the base type (ID or Mass) from the metric name
+        # We assume the last part of the key before "_loss" is the identifier (e.g., "jet_id_output" or "mass_output")
+        if "jet_id_output" in metric_name_base:
+            base_label = "jetid"
+        elif "mass_output" in metric_name_base:
+            base_label = "mass"
+        else:
+            # Fallback for other metrics
+            base_label = metric_name_base.split("_")[-2]
+
+        train_label = f"training_loss_{base_label}"
+        val_label = f"validation_loss_{base_label}"
+
+        # --- End Custom Labeling Logic ---
+
+        ax.plot(
+            history.history[train_key],
+            label=train_label,  # Use the explicit label
+            linewidth=style.LINEWIDTH,
+        )
+
+        ax.plot(
+            history.history[val_key],
+            label=val_label,  # Use the explicit label
+            linestyle="--",  # Differentiate train/val better
+            linewidth=style.LINEWIDTH,
+        )
+
+        combined_metric_label += base_label + "_"
+
+    ax.grid(True)
+    ax.set_ylabel("Loss Magnitude (Weighted)")
+    ax.set_xlabel("Epoch")
+    ax.legend(loc="upper right", ncol=2)
+
+    save_path = os.path.join(
+        plot_dir, "loss_combined_" + combined_metric_label + "history"
+    )
+    plt.savefig(f"{save_path}.png", bbox_inches="tight")
+    fig.clf()
 
 
 def loss_history(plot_dir, loss_names, history):
@@ -216,7 +279,7 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
         # Extract the one-hot column for the current class
         y_true = y_test[:, i]
         y_score = y_pred[:, i]  # Predicted probabilities for the current class
-
+        print(y_score)
         # Compute FPR, TPR, and AUC
         fpr, tpr, _ = roc_curve(y_true, y_score)
         roc_auc = auc(fpr, tpr)
@@ -231,6 +294,19 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
             linewidth=style.LINEWIDTH,
         )
 
+    # Plotting the curve for random classifier
+    random_x = np.linspace(0, 1, 100)
+    ax.plot(
+        random_x,
+        random_x,  # FPR = TPR (y=x)
+        linestyle="--",
+        color="gray",
+        label="Random Classifier (AUC = 0.5)",
+        linewidth=style.LINEWIDTH / 2,  # Make it slightly thinner
+    )
+
+    # Plot formatting...
+    ax.grid(True)
     # Plot formatting
     ax.grid(True)
     ax.set_ylabel("Mistag Rate")
@@ -321,7 +397,8 @@ def pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir):
 def plot_input_vars(X_test, input_vars, plot_dir):
     save_dir = os.path.join(plot_dir, "inputs")
     os.makedirs(save_dir, exist_ok=True)
-
+    print(input_vars)
+    print(X_test.shape)
     for i in range(len(input_vars)):
         plot_histo(
             [X_test[:, :, i].flatten()],
@@ -335,6 +412,64 @@ def plot_input_vars(X_test, input_vars, plot_dir):
         plt.savefig(f"{save_path}.png", bbox_inches="tight")
         plt.savefig(f"{save_path}.pdf", bbox_inches="tight")
         plt.close()
+
+
+def plot_input_vars_by_label(X_test, y_test, input_vars, label_names, plot_dir):
+    """
+    X_test: shape (N, n_constituents, n_features)
+    y_test: shape (N, n_classes) one-hot
+    input_vars: list of feature names (length = n_features)
+    label_names: list of class names (length = n_classes)
+    """
+
+    save_dir = os.path.join(plot_dir, "inputs_by_class")
+    os.makedirs(save_dir, exist_ok=True)
+
+    y_class = np.argmax(y_test, axis=1)  # class index per event
+
+    for i, var in enumerate(input_vars):
+        # collect feature values per class
+        class_hists = []
+        class_labels = []
+
+        for c in range(len(label_names)):
+            mask = y_class == c
+
+            # flatten over constituents
+            values = X_test[mask, :, i].flatten()
+
+            # optional: remove NaNs/infs
+            values = values[np.isfinite(values)]
+
+            if len(values) == 0:
+                continue
+
+            class_hists.append(values)
+            class_labels.append(label_names[c])
+
+        if len(class_hists) == 0:
+            continue
+
+        # shared range for all classes
+        vmin = min(np.min(h) for h in class_hists)
+        vmax = max(np.max(h) for h in class_hists)
+
+        # Swapping order so that we get red signal and black background
+        class_hists = class_hists[::-1]
+        class_labels = class_labels[::-1]
+        fig = plot_histo(
+            class_hists,
+            class_labels,
+            "",
+            style.INPUT_FEATURE_STYLE.get(var, var),
+            "a.u",
+            range=(vmin, vmax),
+        )
+
+        save_path = os.path.join(save_dir, var)
+        fig.savefig(f"{save_path}.png", bbox_inches="tight")
+        fig.savefig(f"{save_path}.pdf", bbox_inches="tight")
+        plt.close(fig)
 
 
 def get_response(truth_pt, reco_pt, pt_ratio):
@@ -979,7 +1114,210 @@ def process_labels(process_key):
     return processes[process_key]
 
 
+def plot_tsne(model, X_test, y_test):
+    from sklearn.manifold import TSNE
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    from matplotlib.lines import Line2D
+
+    # invert label mapping: index -> name
+    idx_to_label = {v: k for k, v in model.class_labels.items()}
+    n_classes = len(idx_to_label)
+
+    # t-SNE
+    tsne = TSNE(n_components=2, random_state=42, perplexity=50)
+    X_test_reduced = X_test.mean(axis=1)
+    X_embedded = tsne.fit_transform(X_test_reduced)
+
+    y_test_idx = y_test.argmax(axis=1)
+    classes = np.unique(y_test_idx)
+
+    base_cmap = cm.get_cmap("Set1", n_classes)
+    cmap = ListedColormap(base_cmap(np.arange(n_classes)))
+    norm = BoundaryNorm(np.arange(n_classes + 1), n_classes)
+
+    plt.figure(figsize=(16, 10))
+    scatter = plt.scatter(
+        X_embedded[:, 0],
+        X_embedded[:, 1],
+        c=y_test_idx,
+        cmap=cmap,
+        norm=norm,
+        alpha=0.7,
+        s=4,
+    )
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="",
+            markersize=6,
+            markerfacecolor=cmap(norm(cls)),
+            label=idx_to_label[cls],
+        )
+        for cls in classes
+    ]
+    plt.legend(handles=handles, title="Classes", loc="upper left")
+    plt.title("t-SNE visualization")
+    plt.xlabel("t-SNE feature 1")
+    plt.ylabel("t-SNE feature 2")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("tsne_plot_mean.png")
+
+
 # <<<<<<<<<<<<<<<<< end of plotting functions, call basic to plot all of them
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import umap
+from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.lines import Line2D
+
+
+def inspect_latents(model, X_test, y_test):
+    idx_to_label = {v: k for k, v in model.class_labels.items()}
+    n_classes = len(idx_to_label)
+    # build latent model
+    model = model.jet_model
+    latent_model = tf.keras.Model(
+        inputs=model.input, outputs=model.get_layer("pool").output
+    )
+
+    latent_layer = "Dense_{}_jetID".format(2)
+    latent_model = tf.keras.Model(model.input, model.get_layer(latent_layer).output)
+
+    X_lat = latent_model.predict(X_test)
+
+    X_lat = StandardScaler().fit_transform(X_lat)
+    X_lat = PCA(n_components=20, whiten=True).fit_transform(X_lat)
+
+    X_umap = umap.UMAP(n_neighbors=30, min_dist=0.1, metric="euclidean").fit_transform(
+        X_lat
+    )
+
+    y_test_idx = y_test.argmax(axis=1)
+    classes = np.unique(y_test_idx)
+
+    base_cmap = cm.get_cmap("Set1", n_classes)
+    cmap = ListedColormap(base_cmap(np.arange(n_classes)))
+    norm = BoundaryNorm(np.arange(n_classes + 1), n_classes)
+
+    plt.figure(figsize=(16, 10))
+    scatter = plt.scatter(
+        X_umap[:, 0],
+        X_umap[:, 1],
+        c=y_test_idx,
+        cmap=cmap,
+        norm=norm,
+        alpha=0.7,
+        s=4,
+    )
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="",
+            markersize=6,
+            markerfacecolor=cmap(norm(cls)),
+            label=idx_to_label[cls],
+        )
+        for cls in classes
+    ]
+    plt.legend(handles=handles, title="Classes", loc="upper left")
+    plt.title("Model latents with UMAP")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("latents.png")
+
+
+def pt_correction_hist_labels(
+    pt_ratio, truth_pt_test, reco_pt_test, y_test, class_labels, class_pair, plot_dir
+):
+    """
+    Plot truth/reco/corrected pT distributions, split by two classes.
+
+    Colors = classes
+    Linestyles = truth/reco/corrected
+    """
+
+    save_dir = os.path.join(plot_dir, "pt_hists_by_class")
+    os.makedirs(save_dir, exist_ok=True)
+
+    idx1 = class_labels[class_pair[0]]
+    idx2 = class_labels[class_pair[1]]
+
+    # select events that are either class1 or class2
+    mask = (y_test[:, idx1] == 1) | (y_test[:, idx2] == 1)
+
+    truth = truth_pt_test[mask]
+    reco = reco_pt_test[mask]
+    ratio = pt_ratio[mask]
+    y_sel = y_test[mask]
+
+    corr = reco * ratio
+
+    # split by class
+    truth_1 = truth[y_sel[:, idx1] == 1]
+    reco_1 = reco[y_sel[:, idx1] == 1]
+    corr_1 = corr[y_sel[:, idx1] == 1]
+
+    truth_2 = truth[y_sel[:, idx2] == 1]
+    reco_2 = reco[y_sel[:, idx2] == 1]
+    corr_2 = corr[y_sel[:, idx2] == 1]
+
+    fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
+    hep.cms.label(
+        llabel=style.CMSHEADER_LEFT,
+        rlabel=style.CMSHEADER_RIGHT,
+        ax=ax,
+        fontsize=style.CMSHEADER_SIZE,
+    )
+
+    bins = 60
+    pt_range = (0, 300)
+
+    # ---- class 1 (red) ----
+    ax.hist(
+        truth_1,
+        bins=bins,
+        range=pt_range,
+        histtype="step",
+        linewidth=style.LINEWIDTH,
+        linestyle="-",
+        color="red",
+        density=True,
+        label=f"{style.CLASS_LABEL_STYLE[class_pair[0]]} Truth",
+    )
+
+    # ---- class 2 (black) ----
+    ax.hist(
+        truth_2,
+        bins=bins,
+        range=pt_range,
+        histtype="step",
+        linewidth=style.LINEWIDTH,
+        linestyle="-",
+        color="black",
+        density=True,
+        label=f"{style.CLASS_LABEL_STYLE[class_pair[1]]} Truth",
+    )
+
+    ax.grid(True)
+    ax.set_xlabel(r"$p_T$ [GeV]", ha="right", x=1)
+    ax.set_ylabel("a.u", ha="right", y=1)
+    ax.legend(loc="upper right", fontsize=style.SMALL_SIZE - 2, ncol=2)
+
+    ax.set_yscale("log")
+    ax.set_ylim([1e-5, 10])
+
+    save_path = os.path.join(save_dir, f"pt_hist_{class_pair[0]}_vs_{class_pair[1]}")
+    fig.savefig(f"{save_path}.pdf", bbox_inches="tight")
+    fig.savefig(f"{save_path}.png", bbox_inches="tight")
+    plt.close(fig)
+
+    return
 
 
 def basic(model, signal_dirs, plot_pt_regress=True):
@@ -987,6 +1325,8 @@ def basic(model, signal_dirs, plot_pt_regress=True):
     Plot the basic ROCs for different classes. Does not reflect L1 rate
     Returns a dictionary of ROCs for each class
     """
+
+    # inspect_asra_data(model)
 
     plot_dir = os.path.join(model.output_directory, "plots/training")
 
@@ -999,10 +1339,35 @@ def basic(model, signal_dirs, plot_pt_regress=True):
     reco_pt_test = np.load(f"{model.output_directory}/testing_data/reco_pt_test.npy")
 
     model_outputs = model.jet_model.predict(X_test)
+    print("Classes in y_test:", np.unique(y_test))
+    print("All classes:", model.class_labels)
+
+    # Plotting t-SNE
+    # plot_tsne(model, X_test, y_test)
+    # inspect_latents(model, X_test, y_test)
 
     # Get classification outputs
     y_pred = model_outputs[0]
     pt_ratio = model_outputs[1][:, 0]
+
+    ROC_binary(
+        y_pred=y_pred,
+        y_test=y_test,
+        class_labels=model.class_labels,
+        plot_dir=plot_dir,
+        class_pair=("bb", "background"),
+        signal_proc="H→bb",
+    )
+
+    pt_correction_hist_labels(
+        pt_ratio,
+        truth_pt_test,
+        reco_pt_test,
+        y_test,
+        model.class_labels,
+        ("bb", "background"),
+        plot_dir,
+    )
 
     # Plot ROC curves
     ROC_dict = ROC(y_pred, y_test, model.class_labels, plot_dir, ROC_dict)
@@ -1071,6 +1436,17 @@ def basic(model, signal_dirs, plot_pt_regress=True):
     plt.savefig(os.path.join(plot_dir, "y_test_histogram.png"), dpi=300)
     plt.show()
 
+    from sklearn.metrics import accuracy_score, f1_score
+
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    test_accuracy = accuracy_score(y_classes, y_pred_classes)
+    test_f1 = f1_score(y_classes, y_pred_classes, average="weighted")
+    # --- Print the Result ---
+    print("-" * 50)
+    print(f"Test Classification Accuracy: {test_accuracy:.4f}")
+    print(f"Test F1: {test_f1:.4f}")
+    print("-" * 50)
+
     # Confusion matrix
     confusion(y_pred, y_test, model.class_labels, plot_dir)
 
@@ -1079,12 +1455,13 @@ def basic(model, signal_dirs, plot_pt_regress=True):
         pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir)
 
     # Plot input distributions
-    plot_input_vars(X_test, model.input_vars, plot_dir)
+    # plot_input_vars(X_test, model.input_vars, plot_dir)
+    plot_input_vars_by_label(X_test, y_test, model.input_vars, labels, plot_dir)
 
     # Plot inclusive response and individual flavor
-    response(
-        model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir
-    )
+    # response(
+    #    model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir
+    # )
 
     # Plot the rms of the residuals vs pt
     # rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)

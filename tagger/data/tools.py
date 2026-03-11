@@ -83,13 +83,13 @@ def _define_target(data, all_labels: None):
 
     for i, jet in enumerate(data["fj_label"]):
         jet_labels = ak.to_list(jet)
-        """
-        print(jet_labels)
         jet_labels = list(set(jet_labels))
-         if len(jet_labels) >= 2:
+        """
+        if len(jet_labels) >= 2:
             print(f"DUPLICATE LABELS: {jet_labels}")
-         else:
+        else:
             print(f"only one label {jet_labels}")
+        """
         # Fill one-hot
         for lbl in jet_labels:
             if lbl in class_labels:
@@ -97,13 +97,10 @@ def _define_target(data, all_labels: None):
                 labels[i, idx] = 1.0
             else:
                 print(f"Warning: unknown label {lbl}")
-        """
-        idx = class_labels[jet_labels]
-        labels[i, idx] = 1.0
-    print(labels)
+        # idx = class_labels[jet_labels]
+        # labels[i, idx] = 1.0
     data = ak.with_field(data, labels, "class_label")
 
-    data = ak.with_field(data, labels, "class_label")
     # Assign numeric values based on conditions using awkward's where function
     # for label, condition in conditions.items():
     #    data["class_label"] = ak.where(
@@ -527,7 +524,7 @@ def _make_nn_jet_inputs(data_split, tag):
 
 
 def to_ML(data, class_labels, combined_mapping=None):
-    keepExtras = False
+    keepExtras = True
     use_jets = True
 
     mask = ak.any(data["nn_inputs"][:, :, 5] > 0, axis=1)
@@ -536,8 +533,9 @@ def to_ML(data, class_labels, combined_mapping=None):
     constit_data = (
         np.asarray(data["nn_inputs"])
         if keepExtras
-        # Remove mass column
-        else np.delete(np.asarray(data["nn_inputs"])[:, :, :-4], 5, axis=2)
+        else np.asarray(data["nn_inputs"])[:, :, :-4]
+        # NOTE Remove mass column
+        # else np.delete(np.asarray(data["nn_inputs"])[:, :, :-4], 5, axis=2)
     )
     constit_feats = constit_data[:, :, :]
 
@@ -554,6 +552,7 @@ def to_ML(data, class_labels, combined_mapping=None):
     truth_pt = np.asarray(data["target_pt_phys"])
     reco_pt = np.asarray(data["jet_pt_phys"])
 
+    mass_target = np.asarray(data["jet_mass"])
     if y_int.ndim > 1:
         y_int = y_int.argmax(axis=1)
 
@@ -580,7 +579,7 @@ def to_ML(data, class_labels, combined_mapping=None):
     else:
         y = tf.keras.utils.to_categorical(y_int, num_classes=len(class_labels))
 
-    return X, y, pt_target, truth_pt, reco_pt, class_labels
+    return X, y, pt_target, truth_pt, reco_pt, mass_target, class_labels
 
 
 def load_data(outdir, percentage, test_ratio=0.1, fields=None):
@@ -709,7 +708,8 @@ def make_data(
             (data["jet_pt_phys"] > 15)
             & (np.abs(data["jet_eta_phys"]) < 2.4)
             & (data["jet_reject"] == 0)
-            # & (data["mass"] > 0)
+            & (data["jet_mass"] > 15)
+            & (data["jet_mass"] < 160)
         )
         data = data[jet_cut]
 

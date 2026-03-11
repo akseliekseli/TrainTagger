@@ -3,13 +3,13 @@ run_config:
   verbose: 2
   debug: True
 
-data: "training_data/all/"
+data: "training_data/pfcand_fields_all/"
 labels:
   bb: [H_bb]
   cc: [H_cc]
   qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
   background: [QCD_others]
-columns: [0, 1, 2, 3, 4, 5, 16, 17]
+columns: [0, 4, 29, 30]
 undersampling: [300000, 10000]
 
 pt_regress: True
@@ -18,9 +18,9 @@ adversarial: False
 
 model_config:
   name: md_transformer
-  emb_layers: [64, 64, 128]
-  transformer_layers: [[2, 16, 2, 128], [2, 16, 2, 128]] #num_heads, mha_hidden_dim, num_dense_layers, dim_dense_layers
-  classification_layers: [128, 32]
+  emb_layers: [64, 64, 64]
+  transformer_layers: [[2, 16, 2, 64], [2, 16, 2, 64]] #num_heads, mha_hidden_dim, num_dense_layers, dim_dense_layers
+  classification_layers: [64, 32]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
 

@@ -5,12 +5,11 @@ run_config:
 
 data: "training_data/all/"
 labels:
-  bb: [H_bb]
-  cc: [H_cc]
-  qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
+  sig: [H_bb, H_cc, H_qq, W_qq, Top_bWqq, Top_Wqq]
   background: [QCD_others]
-columns: [0, 1, 2, 3, 4, 5, 16, 17]
-undersampling: [200000, 5000]
+columns:
+#columns: [0, 1, 2, 3, 4, 5, 16, 17]
+undersampling: [500000, 20000]
 
 pt_regress: True
 hyperparameter_opt: False
@@ -33,22 +32,22 @@ quantization_config:
 
 training_config:
   weight_method: "mass"
-  reference: "bb"
+  reference: "sig"
   epochs: 300
   batch_size: 256
-  learning_rate: 0.0001
+  learning_rate: 0.000001
   validation_split: 0.1
 
-  loss_weights: [1., 1.]
+  loss_weights: [1.0, 1.0]
 
   initial_sparsity: 0.0
   final_sparsity: 0.1
 
-  EarlyStopping_patience: 10
+  EarlyStopping_patience: 6
 
   ReduceLROnPlateau_factor: 0.5
-  ReduceLROnPlateau_patience: 5
-  ReduceLROnPlateau_min_lr: 0.0000001
+  ReduceLROnPlateau_patience: 3
+  ReduceLROnPlateau_min_lr: 0.00000001
 
 hls4ml_config:
   input_precision: "ap_fixed<24,12,AP_RND,AP_SAT>"

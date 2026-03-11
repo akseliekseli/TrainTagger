@@ -4,11 +4,13 @@ run_config:
   debug: True
 
 data: "training_data/baseline_hardware_inputs/"
-labels:
-  - H_qq
-  - Top_Wqq
-  - Top_bWqq
-  - W_qq
+labels: "all"
+columns: [0, 1, 2, 3, 4, 5, 16, 17]
+undersampling: [300000, 10000]
+
+pt_regress: True
+hyperparameter_opt: False
+adversarial: False
 
 model_config:
   name: transformer
@@ -22,8 +24,9 @@ quantization_config:
 
 training_config:
   weight_method: "onlyclass"
+  reference: "H_bb"
   epochs: 50
-  batch_size: 4096
+  batch_size: 256
   learning_rate: 0.001
   validation_split: 0.1
 

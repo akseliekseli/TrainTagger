@@ -1355,8 +1355,8 @@ def basic(model, signal_dirs, plot_pt_regress=True):
         y_test=y_test,
         class_labels=model.class_labels,
         plot_dir=plot_dir,
-        class_pair=("bb", "background"),
-        signal_proc="H→bb",
+        class_pair=("background", "X_bbcc"),
+        signal_proc="X→bb/cc",
     )
 
     pt_correction_hist_labels(
@@ -1365,7 +1365,7 @@ def basic(model, signal_dirs, plot_pt_regress=True):
         reco_pt_test,
         y_test,
         model.class_labels,
-        ("bb", "background"),
+        ("background", "X_bbcc"),
         plot_dir,
     )
 

@@ -36,7 +36,7 @@ training_config:
   reference: "bb"
   epochs: 300
   batch_size: 64
-  learning_rate: 0.0001
+  learning_rate: 0.01
   validation_split: 0.1
 
   loss_weights: [1, 1.0]
@@ -44,10 +44,10 @@ training_config:
   initial_sparsity: 0.0
   final_sparsity: 0.0
 
-  EarlyStopping_patience: 10
+  EarlyStopping_patience: 20
 
   ReduceLROnPlateau_factor: 0.5
-  ReduceLROnPlateau_patience: 5
+  ReduceLROnPlateau_patience: 20
   ReduceLROnPlateau_min_lr: 0.0000001
 
 hls4ml_config:

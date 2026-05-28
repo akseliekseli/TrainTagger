@@ -200,67 +200,56 @@ def train_weights(
     if weightingMethod == "mass":
         min_m, max_m = mass_target_train.min(), mass_target_train.max()
         mass_bins = np.linspace(min_m, max_m, 51)
-        MAX_MASS_WEIGHT_CAP = 5.0  # Cap to prevent exploding weights in empty bins
+        MAX_MASS_WEIGHT_CAP = 5.0
 
-        target_density = None
+        # Get reference (signal) mass distribution as target
+        ref_idx = class_labels[reference_class]
+        ref_mask = y_train[:, ref_idx] == 1
+        ref_mass_data = mass_target_train[ref_mask]
+        ref_hist, _ = np.histogram(ref_mass_data, bins=mass_bins)
 
-        if reference_class and reference_class in class_labels:
-            # Identify the reference (Signal) data
-            ref_idx = class_labels[reference_class]
-            ref_mask = y_train[:, ref_idx] == 1
-            ref_mass_data = mass_target_train[ref_mask]
+        if np.sum(ref_hist) == 0:
+            raise ValueError(f"Reference class '{reference_class}' has no mass data.")
 
-            ref_hist, _ = np.histogram(ref_mass_data, bins=mass_bins)
+        target_density = ref_hist / np.sum(ref_hist)
 
-            if np.sum(ref_hist) > 0:
-                target_density = ref_hist / np.sum(ref_hist)
-                if debug:
-                    print(f"Reference Class '{reference_class}' set as target shape.")
-
-        for _label, idx in class_labels.items():
+        for label, idx in class_labels.items():
             class_mask = y_train[:, idx] == 1
-            class_mass_data = mass_target_train[class_mask]
             sample_indices = np.where(class_mask)[0]
+            class_mass_data = mass_target_train[
+                class_mask
+            ]  # ← move this BEFORE the continue
 
+            # Skip all signal classes — keep their weights at 1.0
+            if label != "background":
+                sample_weights[sample_indices] = 1.0
+                continue
+
+            # Only reweight background to match reference shape
             hist, _ = np.histogram(class_mass_data, bins=mass_bins)
 
             mass_weights_per_bin = np.zeros(len(mass_bins) - 1)
+            class_total = np.sum(hist)
 
-            if target_density is not None:
-                class_total = np.sum(hist)
-                if class_total > 0:
-                    class_density = hist / class_total
-
-                    for bin_idx in range(len(mass_bins) - 1):
-                        p_class = class_density[bin_idx]
-                        p_target = target_density[bin_idx]
-
-                        if p_class > 0:
-                            w = p_target / p_class
-                            mass_weights_per_bin[bin_idx] = min(w, MAX_MASS_WEIGHT_CAP)
-                        else:
-                            mass_weights_per_bin[bin_idx] = 0.0
-            else:
-                non_zero_counts = hist[hist > 0]
-                mass_target_count = (
-                    np.median(non_zero_counts) if len(non_zero_counts) > 0 else 1.0
-                )
-
+            if class_total > 0:
+                class_density = hist / class_total
                 for bin_idx in range(len(mass_bins) - 1):
-                    count = hist[bin_idx]
-                    if count > 0:
-                        w = mass_target_count / count
-                        mass_weights_per_bin[bin_idx] = min(w, MAX_MASS_WEIGHT_CAP)
+                    p_class = class_density[bin_idx]
+                    p_target = target_density[bin_idx]
+                    if p_class > 0:
+                        mass_weights_per_bin[bin_idx] = min(
+                            p_target / p_class, MAX_MASS_WEIGHT_CAP
+                        )
 
             mass_bin_indices = np.digitize(class_mass_data, mass_bins) - 1
             mass_bin_indices = np.clip(mass_bin_indices, 0, len(mass_bins) - 2)
 
-            sample_weights[sample_indices] = mass_weights_per_bin[mass_bin_indices]
+            # Multiply into existing pT weights rather than overwrite
+            sample_weights[sample_indices] *= mass_weights_per_bin[mass_bin_indices]
 
             if debug:
-                print(
-                    f"DEBUG - Processed Class {idx}. Reference used: {target_density is not None}"
-                )
+                print(f"DEBUG - Mass reweighted class '{label}' (idx {idx})")
+                print(f"  mass_weights_per_bin: {mass_weights_per_bin}")
 
     # Normalize sample weights
     sample_weights = sample_weights / np.mean(sample_weights)
@@ -515,7 +504,7 @@ def train(model, data, args, labels_to_use, config):
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
     out_dir = args.output
     data_train, data_test, class_labels, input_vars, extra_vars = load_data(
-        data, percentage=args.percent
+        data, percentage=args.percent, test_ratio=0.2
     )
 
     # Use only labels spesified in the config file
@@ -581,7 +570,7 @@ def train(model, data, args, labels_to_use, config):
     mass_target_test = mass_target_test[idx_test]
     """
 
-    plot_deta_dphi(X_train, y_train, feat_x=3, feat_y=4)
+    # plot_deta_dphi(X_train, y_train, feat_x=3, feat_y=4)
 
     if config["columns"]:
         X_train = X_train[:, :, config["columns"]]
@@ -606,11 +595,9 @@ def train(model, data, args, labels_to_use, config):
             mass_target_test[idx],
         )
     # Normalize and undersample
-    """
     X_train = normalize(X_train)
     X_test_features, X_test_labels = X_test
     X_test = (normalize(X_test_features), X_test_labels)
-    """
     save_test_data(
         out_dir, X_test, y_test, truth_pt_test, reco_pt_test, mass_target_test
     )
@@ -620,7 +607,7 @@ def train(model, data, args, labels_to_use, config):
         reco_pt_train,
         mass_target_train,
         class_labels,
-        weightingMethod="mass",
+        weightingMethod=config["training_config"]["weight_method"],
         debug=True,
         reference_class=config["training_config"]["reference"],
     )

@@ -3,14 +3,13 @@ run_config:
   verbose: 2
   debug: True
 
-data: "training_data/all/"
+data: "training_data/"
 labels:
-  bb: [H_bb]
-  cc: [H_cc]
-  qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
   background: [QCD_others]
-columns: [0, 1, 2, 3, 4, 5, 16, 17]
-undersampling: [200000, 5000]
+  X_bbcc: [H_bb, H_cc]
+  X_qq: [H_qq]
+columns: #[0, 1, 2, 3, 4, 5, 6, 16, 17]
+undersampling:
 
 pt_regress: True
 hyperparameter_opt: False
@@ -18,8 +17,8 @@ adversarial: False
 
 model_config:
   name: fatjet_md
-  conv1d_layers: [64, 128, 256]
-  classification_layers: [64, 32]
+  conv1d_layers: [128, 256, 256]
+  classification_layers: [256]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
   aggregator: "mean"
@@ -33,16 +32,16 @@ quantization_config:
 
 training_config:
   weight_method: "mass"
-  reference: "bb"
-  epochs: 300
+  reference: "X_qq"
+  epochs: 20
   batch_size: 256
-  learning_rate: 0.0001
-  validation_split: 0.1
+  learning_rate: 0.001
+  validation_split: 0.3
 
-  loss_weights: [1., 1.]
+  loss_weights: [1., 1., 2.0]
 
   initial_sparsity: 0.0
-  final_sparsity: 0.1
+  final_sparsity: 0.0
 
   EarlyStopping_patience: 10
 

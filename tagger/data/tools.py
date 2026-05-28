@@ -83,13 +83,9 @@ def _define_target(data, all_labels: None):
 
     for i, jet in enumerate(data["fj_label"]):
         jet_labels = ak.to_list(jet)
+        jet_labels = [str(jet)]
         jet_labels = list(set(jet_labels))
-        """
-        if len(jet_labels) >= 2:
-            print(f"DUPLICATE LABELS: {jet_labels}")
-        else:
-            print(f"only one label {jet_labels}")
-        """
+
         # Fill one-hot
         for lbl in jet_labels:
             if lbl in class_labels:
@@ -99,8 +95,10 @@ def _define_target(data, all_labels: None):
                 print(f"Warning: unknown label {lbl}")
         # idx = class_labels[jet_labels]
         # labels[i, idx] = 1.0
+    print(labels)
     data = ak.with_field(data, labels, "class_label")
 
+    data = ak.with_field(data, labels, "class_label")
     # Assign numeric values based on conditions using awkward's where function
     # for label, condition in conditions.items():
     #    data["class_label"] = ak.where(

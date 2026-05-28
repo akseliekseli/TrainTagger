@@ -118,6 +118,8 @@ CLASS_LABEL_STYLE = {
     "qq": "qq",
     "tau": "tau",
     "sig": "sig",
+    "X_bbcc": r"$H \rightarrow b\bar{b}c\bar{c}$",
+    "X_qq": r"$H \rightarrow qq$",
 }
 
 

@@ -1,4 +1,6 @@
 import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -13,53 +15,86 @@ from tagger.model.common import fromFolder
 from tagger.plot import style
 from tagger.plot.common import plot_2d
 
+
+import tensorflow as tf
+
+gpus = tf.config.list_physical_devices("GPU")
+if gpus:
+    print(f"Using GPU: {gpus[0].name}")
+else:
+    print("No GPUs found, running on CPU")
 style.set_style()
 
 
 def getReports(indir):
     data_ = {}
 
-    report_csynth = Path('{}/L1TSC4NGJetModel_test_prj/solution1/syn/report/L1TSC4NGJetModel_test_csynth.rpt'.format(indir))
+    report_csynth = Path(
+        "{}/baseline_prj/solution1/syn/report/baseline_csynth.rpt".format(indir)
+    )
 
     if report_csynth.is_file():
-        print('Found valid vsynth and synth in {}! Fetching numbers'.format(indir))
+        print("Found valid vsynth and synth in {}! Fetching numbers".format(indir))
 
         with report_csynth.open() as report:
             lines = np.array(report.readlines())
-            lat_line = lines[np.argwhere(np.array(['Latency (cycles)' in line for line in lines])).flatten()[0] + 3]
-            data_['latency_clks'] = int(lat_line.split('|')[2])
-            data_['latency_mus'] = float(lat_line.split('|')[2]) * 5.0 / 1000.0
-            data_['latency_ii'] = int(lat_line.split('|')[6])
+            lat_line = lines[
+                np.argwhere(
+                    np.array(["Latency (cycles)" in line for line in lines])
+                ).flatten()[0]
+                + 3
+            ]
+            data_["latency_clks"] = int(lat_line.split("|")[2])
+            data_["latency_mus"] = float(lat_line.split("|")[2]) * 5.0 / 1000.0
+            data_["latency_ii"] = int(lat_line.split("|")[6])
 
-            resource_line = lines[np.argwhere(np.array(['|Utilization (%)' in line for line in lines])).flatten()[0]]
+            resource_line = lines[
+                np.argwhere(
+                    np.array(["|Utilization (%)" in line for line in lines])
+                ).flatten()[0]
+            ]
             try:
-                data_['bram_rel'] = int(resource_line.split('|')[2])
+                data_["bram_rel"] = int(resource_line.split("|")[2])
             except ValueError:
-                data_['bram_rel'] = 0
-            data_['dsp_rel'] = int(resource_line.split('|')[3])
-            data_['ff_rel'] = int(resource_line.split('|')[4])
-            data_['lut_rel'] = int(resource_line.split('|')[5])
+                data_["bram_rel"] = 0
+            data_["dsp_rel"] = int(resource_line.split("|")[3])
+            data_["ff_rel"] = int(resource_line.split("|")[4])
+            data_["lut_rel"] = int(resource_line.split("|")[5])
 
-            total_line = lines[np.argwhere(np.array(['|Total ' in line for line in lines])).flatten()[0]]
-            data_['bram'] = int(total_line.split('|')[2])
-            data_['dsp'] = int(total_line.split('|')[3])
-            data_['ff'] = int(total_line.split('|')[4])
-            data_['lut'] = int(total_line.split('|')[5])
+            total_line = lines[
+                np.argwhere(np.array(["|Total " in line for line in lines])).flatten()[
+                    0
+                ]
+            ]
+            data_["bram"] = int(total_line.split("|")[2])
+            data_["dsp"] = int(total_line.split("|")[3])
+            data_["ff"] = int(total_line.split("|")[4])
+            data_["lut"] = int(total_line.split("|")[5])
 
     return data_
 
 
-def doPlots(model, outputdir, inputdir):
+def doPlots(model, outputdir, inputdir, labels_to_use, config):
     os.makedirs(outputdir, exist_ok=True)
 
-    data, _, class_labels, input_vars, extra_vars = load_data(inputdir, percentage=100, test_ratio=0.0)
-    X_test, Y_test, pt_target, truth_pt, _ = to_ML(data, class_labels)
+    data, _, class_labels, input_vars, extra_vars = load_data(
+        inputdir, percentage=100, test_ratio=0.0
+    )
+    X_test, y_test, _, truth_pt_test, reco_pt_test, mass_target_test, class_labels = (
+        to_ML(data, class_labels, labels_to_use)
+    )
 
+    if config["columns"]:
+        X_test = (X_test[0][:, :, config["columns"]], X_test[1])
+    X_test = X_test[0][0:10000, :, :] if isinstance(X_test, tuple) else X_test
     labels = list(class_labels.keys())
 
-    model.hls4ml_convert("temp", build=False)
+    model.hls4ml_convert("output/baseline", build=False)
+    print("predicting")
     y_hls, y_ptreg_hls = model.hls_jet_model.predict(np.ascontiguousarray(X_test))
+    print("hls predictions done")
     y_class, y_ptreg = model.jet_model.predict(np.ascontiguousarray(X_test))
+    print("Predictions done, starting plotting!")
 
     for i, label in enumerate(labels):
         plt.clf()
@@ -74,24 +109,36 @@ def doPlots(model, outputdir, inputdir):
             "hls4ml",
             style.CLASS_LABEL_STYLE[label] + " score",
         )
-        figure.savefig("%s/%s_score_2D.png" % (outputdir, label), bbox_inches='tight')
-        figure.savefig("%s/%s_score_2D.pdf" % (outputdir, label), bbox_inches='tight')
+        figure.savefig("%s/%s_score_2D.png" % (outputdir, label), bbox_inches="tight")
+        figure.savefig("%s/%s_score_2D.pdf" % (outputdir, label), bbox_inches="tight")
 
     plt.clf()
     figure = plot_2d(
         y_ptreg[:, 0],
         y_ptreg_hls[:, 0],
-        (min(np.amin(y_ptreg_hls), np.amin(y_ptreg)), max(np.amax(y_ptreg_hls), np.amax(y_ptreg))),
-        (min(np.amin(y_ptreg_hls), np.amin(y_ptreg)), max(np.amax(y_ptreg_hls), np.amax(y_ptreg))),
+        (
+            min(np.amin(y_ptreg_hls), np.amin(y_ptreg)),
+            max(np.amax(y_ptreg_hls), np.amax(y_ptreg)),
+        ),
+        (
+            min(np.amin(y_ptreg_hls), np.amin(y_ptreg)),
+            max(np.amax(y_ptreg_hls), np.amax(y_ptreg)),
+        ),
         "Tensorflow",
         "hls4ml",
         "Regression score",
     )
-    figure.savefig("%s/%s_score_2D.png" % (outputdir, "Regression"), bbox_inches='tight')
-    figure.savefig("%s/%s_score_2D.pdf" % (outputdir, "Regression"), bbox_inches='tight')
+    figure.savefig(
+        "%s/%s_score_2D.png" % (outputdir, "Regression"), bbox_inches="tight"
+    )
+    figure.savefig(
+        "%s/%s_score_2D.pdf" % (outputdir, "Regression"), bbox_inches="tight"
+    )
     plt.close()
 
-    wp, wph, ap, aph = hls4ml.model.profiling.numerical(model=model.jet_model, hls_model=model.hls_jet_model, X=X_test)
+    wp, wph, ap, aph = hls4ml.model.profiling.numerical(
+        model=model.jet_model, hls_model=model.hls_jet_model, X=X_test
+    )
     ap.savefig(outputdir + "/model_activations_profile.png")
     wp.savefig(outputdir + "/model_weights_profile.png")
     aph.savefig(outputdir + "/model_activations_profile_opt.png")
@@ -114,36 +161,72 @@ def doPlots(model, outputdir, inputdir):
             layer + " agreement",
         )
         plt.plot([min_x, max_x], [min_x, max_x], c="gray")
-        plt.savefig(f"{outputdir}/profile_2d_{layer}.png", bbox_inches='tight')
-        plt.savefig(f"{outputdir}/profile_2d_{layer}.pdf", bbox_inches='tight')
+        plt.savefig(f"{outputdir}/profile_2d_{layer}.png", bbox_inches="tight")
+        plt.savefig(f"{outputdir}/profile_2d_{layer}.pdf", bbox_inches="tight")
         plt.close()
 
     return
 
 
 if __name__ == "__main__":
-
     parser = ArgumentParser()
-    parser.add_argument('-m', '--model_path', default='output/baseline', help='Input model path for comparison')
-    parser.add_argument('-o', '--outpath', default='output/baseline/plots/profile', help='Jet tagger plotting directory')
     parser.add_argument(
-        '-of', '--outpath_firmware', default='output/baseline/firmware', help='Jet tagger firmware directory'
+        "-m",
+        "--model_path",
+        default="output/baseline",
+        help="Input model path for comparison",
     )
-    parser.add_argument('-i', '--input', default='data/jetTuple_extended_5.root', help='Path to profiling data rootfile')
-    parser.add_argument('-r', '--remake', default=False, help='Remake profiling data? ')
-    parser.add_argument('-y', '--yaml_config', default='tagger/model/configs/baseline.yaml', help='YAML config for model')
+    parser.add_argument(
+        "-o",
+        "--outpath",
+        default="output/baseline/plots/profile",
+        help="Jet tagger plotting directory",
+    )
+    parser.add_argument(
+        "-of",
+        "--outpath_firmware",
+        default="output/baseline/firmware",
+        help="Jet tagger firmware directory",
+    )
+    parser.add_argument(
+        "-i",
+        "--input",
+        default="data/jetTuple_extended_5.root",
+        help="Path to profiling data rootfile",
+    )
+    parser.add_argument("-r", "--remake", default=False, help="Remake profiling data? ")
+    parser.add_argument(
+        "-y",
+        "--yaml_config",
+        default="tagger/model/configs/baseline.yaml",
+        help="YAML config for model",
+    )
 
     args = parser.parse_args()
 
-    model = fromFolder(args.model_path)
+    import yaml
+
+    with open(args.yaml_config, "r") as stream:
+        yaml_dict = yaml.safe_load(stream)
+    print(yaml_dict)
+    model = fromFolder(args.model_path, yaml_dict)
+    """
 
     if args.remake:
-        make_data(infile=args.input, outdir="profiling_data/", extras='extra_emulation_fields', tree="outnano/Jets")
+        make_data(
+            infile=args.input,
+            outdir="profiling_data/",
+            extras="extra_emulation_fields",
+            tree="outnano/Jets",
+        )
 
-    doPlots(model, args.outpath, "profiling_data/")
+    labels_to_use = yaml_dict["labels"]
+    doPlots(model, args.outpath, "profiling_data/", labels_to_use, yaml_dict)
+    """
 
-    report = getReports(args.outpath_firmware + '/' + model.hls4ml_config['project_name'])
-
+    report = getReports(
+        args.outpath_firmware + "/" + model.hls4ml_config["project_name"]
+    )
     # if os.path.isfile("mlflow_run_id.txt"):
 
     #     f = open("mlflow_run_id.txt", "r")
@@ -166,15 +249,15 @@ if __name__ == "__main__":
     #         mlflow.log_param('Regression Precision ',precisions[2])
 
     print("===================")
-    print('Input Precision : ', model.hls4ml_config['input_precision'])
-    print('Class Precision : ', model.hls4ml_config['class_precision'])
-    print('Regression Precision : ', model.hls4ml_config['reg_precision'])
+    print("Input Precision : ", model.hls4ml_config["input_precision"])
+    print("Class Precision : ", model.hls4ml_config["class_precision"])
+    print("Regression Precision : ", model.hls4ml_config["reg_precision"])
     print(" Resource Usage of a VU13P")
-    print('Flip Flops : ', report['ff_rel'], ' %')
-    print('Look Up Tables : ', report['lut_rel'], ' %')
-    print('Block RAM : ', report['bram_rel'], ' %')
-    print('Digital Signal Processors : ', report['dsp_rel'], ' %')
-    print('Latency : ', report['latency_clks'], ' clock cycles')
-    print('Latency : ', report['latency_mus'], ' mus')
-    print('Initiation Interval : ', report['latency_mus'], ' clock cycles')
+    print("Flip Flops : ", report["ff_rel"], " %")
+    print("Look Up Tables : ", report["lut_rel"], " %")
+    print("Block RAM : ", report["bram_rel"], " %")
+    print("Digital Signal Processors : ", report["dsp_rel"], " %")
+    print("Latency : ", report["latency_clks"], " clock cycles")
+    print("Latency : ", report["latency_mus"], " mus")
+    print("Initiation Interval : ", report["latency_ii"], " clock cycles")
     print("===================")

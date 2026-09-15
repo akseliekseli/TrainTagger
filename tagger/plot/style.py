@@ -79,6 +79,8 @@ CLASS_LABEL_STYLE = {
     "leptons": "Leptons (muon, electron)",
     "H_bb": "$H_{bb}$",
     "H_cc": "$H_{cc}$",
+    "X_bb": "$X_{bb}$",
+    "X_cc": "$H_{cc}$",
     "H_ee": "$H_{ee}$",
     "H_gg": "$H_{gg}$",
     "H_mm": "$H_{\\mu\\mu}$",
@@ -118,8 +120,8 @@ CLASS_LABEL_STYLE = {
     "qq": "qq",
     "tau": "tau",
     "sig": "sig",
-    "X_bbcc": r"$H \rightarrow b\bar{b}c\bar{c}$",
-    "X_qq": r"$H \rightarrow qq$",
+    "X_bbcc": r"$X \rightarrow b\bar{b} / c\bar{c}$",
+    "X_qq": r"$X \rightarrow qq$",
 }
 
 

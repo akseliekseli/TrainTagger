@@ -248,14 +248,13 @@ class DeepSetModel(JetTagModel):
 
         # Define the pruning
         self._prune_model(num_samples)
-        focal = categorical_focal_loss(gamma=2.0, alpha=None)
         # compile the tensorflow model setting the loss and metrics
         self.jet_model.compile(
             optimizer=tf.keras.optimizers.Adam(
                 learning_rate=self.training_config["learning_rate"]
             ),
             loss={
-                self.loss_name + self.output_id_name: focal,
+                self.loss_name + self.output_id_name: "categorical_crossentropy",
                 self.loss_name + self.output_pt_name: tf.keras.losses.Huber(),
             },
             loss_weights=self.training_config["loss_weights"],
@@ -300,6 +299,20 @@ class DeepSetModel(JetTagModel):
             callbacks=self.callbacks,
             shuffle=True,
         )
+        # --- Verify pruning sparsity after training ---
+        print("\n--- Pruning sparsity check ---")
+        found_any = False
+        for layer in self.jet_model.layers:
+            if hasattr(layer, "get_prunable_weights"):
+                found_any = True
+                for w in layer.get_prunable_weights():
+                    sparsity = 1.0 - (tf.math.count_nonzero(w).numpy() / w.numpy().size)
+                    print(f"  {layer.name}: sparsity = {sparsity:.3f}")
+        if not found_any:
+            print(
+                "  WARNING: No prunable layers found — pruning wrappers may not have been applied!"
+            )
+        print("-----------------------------\n")
 
     # Decorated with save decorator for added functionality
     @JetTagModel.save_decorator
@@ -350,7 +363,7 @@ class DeepSetModel(JetTagModel):
 
         # Create default config
         config = hls4ml.utils.config_from_keras_model(
-            self.jet_model, granularity="name"
+            self.jet_model, granularity="name", backend="Vitis"
         )
         config["IOType"] = "io_parallel"
         config["LayerName"]["model_input"]["Precision"]["result"] = self.hls4ml_config[
@@ -418,3 +431,39 @@ class DeepSetModel(JetTagModel):
         if build:
             # build the project
             self.hls_jet_model.build(csim=False, reset=True)
+
+    def load_pretrained_backbone(self, weights_path: str, freeze_epochs: int = 0):
+        """Load conv1d + norm_input weights from a ContrastivePretrainer encoder
+        (see pretrain_jetclr.py). Only layers with matching names get loaded --
+        the classification/regression heads are untouched and stay randomly
+        initialized, since they never existed in the contrastive encoder.
+
+        Args:
+            weights_path: path to encoder_weights.h5 saved by build_encoder().
+            freeze_epochs: if > 0, freeze the loaded conv1d layers so only the
+                (randomly-initialized) heads train for the first N epochs, then
+                unfreeze. NOTE: this requires calling this method BEFORE
+                compile_model(), and re-compiling after unfreezing if you use this.
+        """
+        import tensorflow as tf
+
+        # Build a throwaway model with the same names as build_encoder() so
+        # load_weights(by_name=True) can match them into self.jet_model.
+        print(f"Loading pretrained encoder weights from {weights_path} ...")
+        self.jet_model.load_weights(weights_path, by_name=True, skip_mismatch=True)
+        print(
+            "Done. Layers matched by name; classification/regression heads "
+            "(any layer name containing '_jetID' or '_pT') were skipped "
+            "since they don't exist in the pretrained encoder file."
+        )
+
+        if freeze_epochs > 0:
+            for layer in self.jet_model.layers:
+                if layer.name.startswith("Conv1D_") or layer.name in ("norm_input",):
+                    layer.trainable = False
+            print(
+                f"Froze backbone layers for the first {freeze_epochs} epochs "
+                "(you'll need to unfreeze + recompile manually after that many "
+                "epochs if you want to fine-tune the full network -- this simple "
+                "version doesn't automate the unfreeze mid-fit)."
+            )

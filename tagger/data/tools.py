@@ -81,12 +81,26 @@ def _define_target(data, all_labels: None):
     class_labels = dict(zip(all_labels, range(len(all_labels))))
     labels = np.zeros((len(data["fj_label"]), len(class_labels)), dtype=np.float32)
 
+    print("Tests")
+    print(data["jet_pt_phys"].type)
+    print(data["fj_label"].type)
+    print(
+        ak.num(data["jet_pt_phys"], axis=1)[:20]
+        if data["jet_pt_phys"].ndim > 1
+        else "jet_pt_phys is flat, ndim=1"
+    )
+    print(
+        ak.num(data["fj_label"], axis=1)[:20]
+        if data["fj_label"].ndim > 1
+        else "fj_label is flat, ndim=1"
+    )
+
     for i, jet in enumerate(data["fj_label"]):
         jet_labels = ak.to_list(jet)
-        jet_labels = [str(jet)]
+        if not isinstance(jet_labels, list):
+            jet_labels = [jet_labels]
         jet_labels = list(set(jet_labels))
 
-        # Fill one-hot
         for lbl in jet_labels:
             if lbl in class_labels:
                 idx = class_labels[lbl]
@@ -136,9 +150,8 @@ def get_unique_fj_labels(infile, tree="outnano/Jets", step_size="500 MB"):
     unique_labels = set()
 
     for arrays in uproot.iterate(
-        infile,
-        treepath=tree,
-        expressions=["fj_label"],  # only load fj_label
+        {infile: tree},
+        expressions=["fj_label"],
         step_size=step_size,
         how="zip",
     ):
@@ -688,20 +701,28 @@ def make_data(
     num_entries_done = 0
     chunk = 0
 
-    all_labels = get_unique_fj_labels(infile)
+    all_labels = get_unique_fj_labels(infile, tree=tree)
     print(f"\nALL LABELS: {all_labels}\n")
     print(f"Total entries: {num_entries}")
 
     for data in uproot.iterate(
-        infile,
+        {infile: tree},
         filter_name=FILTER_PATTERN,
         how="zip",
         step_size=step_size,
         max_workers=8,
     ):
-        num_entries_done += len(data)  # count before cuts
+        jet_fields = data["jet"].fields
+        for f in jet_fields:
+            data[f"jet_{f}"] = data["jet"][f]
 
-        # Define jet kinematic cuts
+        num_entries_done += len(data)
+
+        counts = data["jet_npfcand"]
+        data["jet_pfcand"] = ak.unflatten(
+            data["jet_pfcand"], ak.flatten(counts), axis=1
+        )
+
         jet_cut = (
             (data["jet_pt_phys"] > 15)
             & (np.abs(data["jet_eta_phys"]) < 2.4)
@@ -709,8 +730,25 @@ def make_data(
             & (data["jet_mass"] > 15)
             & (data["jet_mass"] < 160)
         )
-        data = data[jet_cut]
 
+        # apply the cut to EVERY jet-level field, not just a subset
+        data["jet"] = data["jet"][jet_cut]
+        data["jet_pfcand"] = data["jet_pfcand"][jet_cut]
+        data["fj_label"] = data["fj_label"][jet_cut]
+        for f in jet_fields:
+            data[f"jet_{f}"] = data[f"jet_{f}"][
+                jet_cut
+            ]  # <-- ADD THIS: cut the flat copies too
+
+        data = ak.without_field(data, "jet_npfcand")
+        data = ak.without_field(data, "jet")
+        if "jagged1" in data.fields:
+            data = ak.without_field(data, "jagged1")
+
+        new_data = {}
+        for field in data.fields:
+            new_data[field] = ak.flatten(data[field], axis=1)
+        data = ak.Array(new_data)
         # Add additional response variables
         # _add_response_vars(data)
         # Split data into all the training classes

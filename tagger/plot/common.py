@@ -16,32 +16,9 @@ MINBIAS_RATE = N_BUNCHES * REVOLUTION_FREQUENCY / 1000  # in kHz
 
 # Define pT bins
 PT_BINS = np.array(
-    [
-        15,
-        17,
-        19,
-        22,
-        25,
-        30,
-        35,
-        40,
-        45,
-        50,
-        60,
-        76,
-        97,
-        122,
-        154,
-        195,
-        246,
-        311,
-        393,
-        496,
-        627,
-        792,
-        1000,
-    ]
+    [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1500, 2000]
 )
+
 
 WPs_CMSSW = {
     # Tau working points as defined here

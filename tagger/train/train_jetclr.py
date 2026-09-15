@@ -807,6 +807,8 @@ def train(model, data, args, labels_to_use, config):
     # output_shape = y_train.shape[1]
     print(input_shape, output_shape)
     model.build_model(input_shape, output_shape)
+    if args.pretrained_encoder:
+        model.load_pretrained_backbone(args.pretrained_encoder)
     # Train it with a pruned model
     num_samples = X_train.shape[0] * (1 - model.training_config["validation_split"])
     model.compile_model(num_samples)
@@ -869,6 +871,12 @@ if __name__ == "__main__":
         default=[],
         nargs="*",
         help="Specify all signal process for individual plotting",
+    )
+
+    parser.add_argument(
+        "--pretrained_encoder",
+        default=None,
+        help="Path to encoder_weights.h5 from pretrain_jetclr.py, warm-starts the conv1d backbone",
     )
 
     args = parser.parse_args()

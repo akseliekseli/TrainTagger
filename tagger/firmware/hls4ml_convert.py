@@ -15,7 +15,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-o",
         "--outpath",
-        default="firmware/L1TSC4NGJetModel",
+        default="firmware/baseline",
         help="Jet tagger synthesized output directory",
     )
 
@@ -31,4 +31,4 @@ if __name__ == "__main__":
 
     # DONE: Add model yaml_dict to the fromFolder()
     model = fromFolder(args.model_path, yaml_dict)
-    model.hls4ml_convert(args.outpath, build=False)
+    model.hls4ml_convert(args.outpath, build=True)

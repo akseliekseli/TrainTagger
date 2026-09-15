@@ -10,7 +10,7 @@ labels:
   X_qq: [H_qq]
   background: [QCD_others]
 columns: [0, 1, 2, 3, 4, 5, 6, 16, 17]
-undersampling: [10000, 5000]
+undersampling: #[10000, 1000]
 
 pt_regress: True
 hyperparameter_opt: False
@@ -32,10 +32,10 @@ quantization_config:
   pt_output_quantization: [16, 6]
 
 training_config:
-  weight_method: "ptref_and_mass"
+  weight_method: "mass"
   reference: null
   epochs: 1000
-  batch_size: 512
+  batch_size: 2048
   learning_rate: 0.01
   validation_split: 0.3
 

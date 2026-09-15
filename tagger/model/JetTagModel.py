@@ -1,8 +1,3 @@
-"""Jet Tag Model base class and additional functionality for model registering
-
-Written 28/05/2025, cebrown@cern.ch
-"""
-
 import functools
 import json
 import os
@@ -11,6 +6,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import numpy.typing as npt
 import yaml
+from schema import Schema, And, Use, Optional
 
 from tagger.plot.basic import loss_history
 
@@ -40,29 +36,38 @@ class JetTagModel(ABC):
         self.quantization_config = {}
         self.training_config = {}
         self.hls4ml_config = {}
+        self.firmware_config = {}
 
-        self.output_id_name = 'jet_id_output'
-        self.output_pt_name = 'pT_output'
-        self.loss_name = ''
+        self.output_id_name = "jet_id_output"
+        self.output_pt_name = "pT_output"
+        self.loss_name = ""
 
         self.callbacks = []
 
         self.history = None
 
+    run_schema = {
+        "verbose": And(int, lambda s: s in [1, 2, 3]),
+        "debug": bool,
+        "num_threads": And(int, lambda s: 1 <= s <= 128),
+    }
+
     def load_yaml(self, yaml_dict: dict):
         """Load config dictionaries
 
         Args:
-            yaml_path (str): Path to yaml file
+            yaml_dict (dict): Parsed yaml config dictionary
         """
+        self.yaml_dict = yaml_dict
 
-        #with open(yaml_path, 'r') as stream:
-        #    yaml_dict = yaml.safe_load(stream)
-        self.run_config = yaml_dict['run_config']
-        self.model_config = yaml_dict['model_config']
-        self.quantization_config = yaml_dict['quantization_config']
-        self.training_config = yaml_dict['training_config']
-        self.hls4ml_config = yaml_dict['hls4ml_config']
+        self.run_config = yaml_dict["run_config"]
+        self.model_config = yaml_dict["model_config"]
+        self.quantization_config = yaml_dict["quantization_config"]
+        self.training_config = yaml_dict["training_config"]
+        if "hls4ml_config" in yaml_dict:
+            self.hls4ml_config = yaml_dict["hls4ml_config"]
+        if "firmware_config" in yaml_dict:
+            self.firmware_config = yaml_dict["firmware_config"]
 
     @abstractmethod
     def build_model(self, **kwargs):
@@ -84,11 +89,16 @@ class JetTagModel(ABC):
         Must be written for child class
         """
 
-    @abstractmethod
     def hls4ml_convert(self, **kwargs):
         """
         Convert the model in hls4ml
-        Must be written for child class
+        Must be written for child class if you want to run this conversion
+        """
+
+    def firmware_convert(self, **kwargs):
+        """
+        Convert the model for firmware
+        Must be written for child class if you want to run the synthesis steps
         """
 
     def predict(self, X_test: npt.NDArray[np.float64]) -> tuple:
@@ -185,7 +195,14 @@ class JetTagModel(ABC):
         os.makedirs(plot_path, exist_ok=True)
 
         # Plot history
-        loss_history(plot_path, [self.loss_name + self.output_id_name, self.loss_name + self.output_pt_name], self.history)
+        loss_history(
+            plot_path,
+            [
+                self.loss_name + self.output_id_name,
+                self.loss_name + self.output_pt_name,
+            ],
+            self.history,
+        )
 
 
 class JetModelFactory:
@@ -204,14 +221,14 @@ class JetModelFactory:
 
         def inner_wrapper(wrapped_class: JetTagModel):
             if name in cls.registry:
-                print('Jet Tagger Model %s already exists. Will replace it', name)
+                print("Jet Tagger Model %s already exists. Will replace it", name)
             cls.registry[name] = wrapped_class
             return wrapped_class
 
         return inner_wrapper
 
     @classmethod
-    def create_JetTagModel(cls, name: str, folder: str, **kwargs) -> 'JetTagModel':
+    def create_JetTagModel(cls, name: str, folder: str, **kwargs) -> "JetTagModel":
         """Factory command to create the Jet Tag Model"""
 
         jettag_class = cls.registry[name]

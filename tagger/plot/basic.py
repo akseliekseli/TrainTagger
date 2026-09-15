@@ -184,7 +184,7 @@ def ROC_taus(y_pred, y_test, class_labels, plot_dir, signal_proc=None):
 
     for tpr, fpr, roc_auc, label in roc_data:
         plt.plot(
-            tpr, fpr, label=f"{label} (AUC = {roc_auc:.2f})", linewidth=style.LINEWIDTH
+            tpr, fpr, label=f"{label} (AUC = {roc_auc:.4f})", linewidth=style.LINEWIDTH
         )
 
     plt.grid(True)
@@ -242,7 +242,7 @@ def ROC_binary(y_pred, y_test, class_labels, plot_dir, class_pair, signal_proc=N
     ax.plot(
         tpr,
         fpr,
-        label=f"{style.CLASS_LABEL_STYLE[class_pair[0]]} vs {style.CLASS_LABEL_STYLE[class_pair[1]]} (AUC = {roc_auc:.2f})",
+        label=f"{style.CLASS_LABEL_STYLE[class_pair[0]]} vs {style.CLASS_LABEL_STYLE[class_pair[1]]} (AUC = {roc_auc:.4f})",
         color="blue",
         linewidth=5,
     )
@@ -264,7 +264,7 @@ def ROC_binary(y_pred, y_test, class_labels, plot_dir, class_pair, signal_proc=N
 def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
     # Create a colormap for unique colors
     # Use 'tab10' with enough colors
-    colormap = cm.get_cmap("Set1", len(class_labels))
+    colormap = matplotlib.colormaps["Set1"].resampled(len(class_labels))
 
     # Create a plot for ROC curves
     fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
@@ -289,7 +289,7 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
         ax.plot(
             tpr,
             fpr,
-            label=f"{style.CLASS_LABEL_STYLE[class_label]} (AUC = {roc_auc:.2f})",
+            label=f"{style.CLASS_LABEL_STYLE[class_label]} (AUC = {roc_auc:.4f})",
             color=colormap(i),
             linewidth=style.LINEWIDTH,
         )
@@ -309,8 +309,8 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
     ax.grid(True)
     # Plot formatting
     ax.grid(True)
-    ax.set_ylabel("Mistag Rate")
-    ax.set_xlabel("Signal Efficiency")
+    ax.set_ylabel("Mistag Rate", fontsize=32)
+    ax.set_xlabel("Signal Efficiency", fontsize=32)
 
     auc_list = [value for key, value in ROC_dict.items()]
     handles, labels = plt.gca().get_legend_handles_labels()
@@ -320,7 +320,7 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
         [labels[idx] for idx in order],
         loc="upper left",
         ncol=2,
-        fontsize=style.SMALL_SIZE - 3,
+        fontsize=style.SMALL_SIZE + 3,
     )
 
     ax.set_yscale("log")
@@ -354,12 +354,14 @@ def confusion(y_pred, y_test, class_labels, plot_dir):
         llabel=style.CMSHEADER_LEFT,
         rlabel=style.CMSHEADER_RIGHT,
         fontsize=style.CMSHEADER_SIZE,
+        ax=ax,
     )
     matrix_display = ConfusionMatrixDisplay(cm, display_labels=labels)
 
-    matrix_display.plot(ax=ax)
+    matrix_display.plot(ax=ax, text_kw={"fontsize": 32})
     matrix_display.im_.set_clim(0, 1)
 
+    ax.tick_params(axis="both", labelsize=32)
     # Remove default the colorbar
     matrix_display.im_.colorbar.remove()
 
@@ -370,7 +372,7 @@ def confusion(y_pred, y_test, class_labels, plot_dir):
 
     # Save the plot
     plt.savefig(os.path.join(plot_dir, f"confusion_matrix.png"), bbox_inches="tight")
-    # plt.savefig(os.path.join(plot_dir, f"confusion_matrix.pdf"), bbox_inches="tight")
+    plt.savefig(os.path.join(plot_dir, f"confusion_matrix.pdf"), bbox_inches="tight")
 
 
 def pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir):
@@ -815,7 +817,7 @@ def shapPlot(shap_values, feature_names, class_names):
         [-np.abs(shap_values[i]).mean() for i in range(len(shap_values))]
     )
     # Use 'tab10' with enough colors
-    colormap = cm.get_cmap("Set1", len(class_names))
+    colormap = matplotlib.colormaps["Set1"].resampled(len(class_names))
 
     for i, ind in enumerate(class_inds):
         global_shap_values = np.abs(shap_values[ind]).mean(0)
@@ -914,7 +916,7 @@ def efficiency(y_pred, y_test, reco_pt_test, class_labels, plot_dir):
             x="midpoints",
             y="wp_medium",
             yerr="err(wp_medium)",
-            label="Medium (eff = 20%)",
+            label="Medium (mistag = 20%)",
             ax=ax,
             color="orange",
             linestyle="-",
@@ -923,7 +925,7 @@ def efficiency(y_pred, y_test, reco_pt_test, class_labels, plot_dir):
             x="midpoints",
             y="wp_tight",
             yerr="err(wp_tight)",
-            label="Tight (eff = 10%)",
+            label="Tight (mistag = 10%)",
             ax=ax,
             color="green",
             linestyle="-",
@@ -941,8 +943,8 @@ def efficiency(y_pred, y_test, reco_pt_test, class_labels, plot_dir):
         plt.close()
 
     eff_selection = {
-        "taus": [class_labels["taup"], class_labels["taum"]],
-        "b": [class_labels["b"]],
+        "X_bbcc": [class_labels["X_bbcc"]],
+        "X_qq": [class_labels["X_qq"]],
     }
 
     for key in eff_selection.keys():
@@ -1052,7 +1054,7 @@ def ROC_jets(y_pred, y_test, class_labels, plot_dir, process_label=None):
     )
 
     for tpr, fpr, roc_auc, label in roc_data:
-        formatted = f"light vs {label} (AUC = {roc_auc:.2f})"
+        formatted = f"light vs {label} (AUC = {roc_auc:.4f})"
         plt.plot(tpr, fpr, label=formatted, linewidth=style.LINEWIDTH)
 
     plt.grid(True)
@@ -1131,7 +1133,8 @@ def plot_tsne(model, X_test, y_test):
     y_test_idx = y_test.argmax(axis=1)
     classes = np.unique(y_test_idx)
 
-    base_cmap = cm.get_cmap("Set1", n_classes)
+    base_cmap = matplotlib.colormaps["Set1"].resampled(n_classes)
+
     cmap = ListedColormap(base_cmap(np.arange(n_classes)))
     norm = BoundaryNorm(np.arange(n_classes + 1), n_classes)
 
@@ -1199,7 +1202,7 @@ def inspect_latents(model, X_test, y_test):
     y_test_idx = y_test.argmax(axis=1)
     classes = np.unique(y_test_idx)
 
-    base_cmap = cm.get_cmap("Set1", n_classes)
+    base_cmap = matplotlib.colormaps["Set1"].resampled(n_classes)
     cmap = ListedColormap(base_cmap(np.arange(n_classes)))
     norm = BoundaryNorm(np.arange(n_classes + 1), n_classes)
 
@@ -1338,8 +1341,20 @@ def basic(model, signal_dirs, plot_pt_regress=True):
     truth_pt_test = np.load(f"{model.output_directory}/testing_data/truth_pt_test.npy")
     reco_pt_test = np.load(f"{model.output_directory}/testing_data/reco_pt_test.npy")
 
+    # Apply pT > 100 GeV cut
+    pt_cut_threshold = 10
+    pt_mask = reco_pt_test > pt_cut_threshold
+
+    X_test = X_test[pt_mask]
+    y_test = y_test[pt_mask]
+    truth_pt_test = truth_pt_test[pt_mask]
+    reco_pt_test = reco_pt_test[pt_mask]
+
+    print(
+        f"Jets after pT > {pt_cut_threshold} GeV cut: {pt_mask.sum()} / {len(pt_mask)}"
+    )
+
     model_outputs = model.jet_model.predict(X_test)
-    print("Classes in y_test:", np.unique(y_test))
     print("All classes:", model.class_labels)
 
     # Plotting t-SNE
@@ -1355,7 +1370,7 @@ def basic(model, signal_dirs, plot_pt_regress=True):
         y_test=y_test,
         class_labels=model.class_labels,
         plot_dir=plot_dir,
-        class_pair=("background", "X_bbcc"),
+        class_pair=("X_qq", "X_bbcc"),
         signal_proc="X→bb/cc",
     )
 
@@ -1365,7 +1380,7 @@ def basic(model, signal_dirs, plot_pt_regress=True):
         reco_pt_test,
         y_test,
         model.class_labels,
-        ("background", "X_bbcc"),
+        ("X_qq", "X_bbcc"),
         plot_dir,
     )
 
@@ -1414,7 +1429,7 @@ def basic(model, signal_dirs, plot_pt_regress=True):
             ROC_taus(sample_preds, sample_labels, model.class_labels, binary_dir_full, process_label)
     """
     # Efficiencies
-    # efficiency(y_pred, y_test, reco_pt_test, model.class_labels, plot_dir)
+    efficiency(y_pred, y_test, reco_pt_test, model.class_labels, plot_dir)
 
     y_classes = np.argmax(y_test, axis=1)
 
@@ -1449,6 +1464,28 @@ def basic(model, signal_dirs, plot_pt_regress=True):
 
     # Confusion matrix
     confusion(y_pred, y_test, model.class_labels, plot_dir)
+
+    from tagger.plot.roc_pt_split import ROC_pt_split, ROC_binary_pt_split
+
+    ROC_pt_split(
+        y_pred,
+        y_test,
+        model.class_labels,
+        reco_pt_test,
+        plot_dir,
+        pt_bins=[0, 100, np.inf],
+    )
+
+    ROC_binary_pt_split(
+        y_pred,
+        y_test,
+        model.class_labels,
+        reco_pt_test,
+        plot_dir,
+        class_pair=("X_qq", "X_bbcc"),
+        pt_bins=[0, 100, np.inf],
+        signal_proc="X→bb/cc",
+    )
 
     if plot_pt_regress:
         # Plot pt corrections

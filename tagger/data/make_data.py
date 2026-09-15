@@ -36,7 +36,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t",
         "--tree",
-        default="outnano/Jets",
+        default="outnanoSC8/Jets",
         help="Tree within the ntuple containing the jets",
     )
 

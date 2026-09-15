@@ -2,15 +2,15 @@ model: DeepSetModel
 run_config:
   verbose: 2
   debug: True
+  num_threads: 32
 
-data: "training_data/hqcd_128/"
+data: "train_data/"
 labels:
-  bb: [H_bb]
-  #cc: [H_cc]
-  #qq: [H_qq, W_qq, Top_bWqq, Top_Wqq]
+  X_bbcc: [H_bb, H_cc]
+  X_qq: [H_qq]
   background: [QCD_others]
-columns: #[0, 1, 2, 3, 4, 5, 16, 17]
-undersampling: [30000, 1000]
+columns: [0, 1, 2, 3, 4, 5, 6, 16, 17]
+undersampling: #[240000, 40000]
 
 pt_regress: True
 hyperparameter_opt: False
@@ -18,41 +18,41 @@ adversarial: False
 
 model_config:
   name: fatjet_md
-  conv1d_layers: [32, 128, 256]
-  classification_layers: [64, 32]
+  conv1d_layers: [64, 128, 256]
+  classification_layers: [128, 64]
   regression_layers: [10]
   kernel_initializer: "lecun_uniform"
   aggregator: "mean"
   #beta: 1.1e-5
 
 quantization_config:
-  quantizer_bits: 16
+  quantizer_bits: 9
   quantizer_bits_int: 2
   quantizer_alpha_val: 1
   pt_output_quantization: [16, 6]
 
 training_config:
-  weight_method: "none"
-  reference: "bb"
-  epochs: 300
-  batch_size: 64
+  weight_method: "ptref"
+  reference: null
+  epochs: 1000
+  batch_size: 2048
   learning_rate: 0.01
-  validation_split: 0.1
+  validation_split: 0.3
 
-  loss_weights: [1, 1.0]
+  loss_weights: [1., 1.0, 1.0]
 
   initial_sparsity: 0.0
-  final_sparsity: 0.0
+  final_sparsity: 0.1
 
-  EarlyStopping_patience: 20
+  EarlyStopping_patience: 15
 
   ReduceLROnPlateau_factor: 0.5
-  ReduceLROnPlateau_patience: 20
+  ReduceLROnPlateau_patience: 7
   ReduceLROnPlateau_min_lr: 0.0000001
 
 hls4ml_config:
-  input_precision: "ap_fixed<24,12,AP_RND,AP_SAT>"
-  class_precision: "ap_ufixed<24,12,AP_RND,AP_SAT>"
+  input_precision: "ap_fixed<16,6,AP_RND,AP_SAT>"
+  class_precision: "ap_ufixed<16,6,AP_RND,AP_SAT>"
   reg_precision: "ap_fixed<16,6,AP_RND,AP_SAT>"
 
-  project_name: "fatjet_md"
+  project_name: "baseline"

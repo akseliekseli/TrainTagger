@@ -17,6 +17,56 @@ from tensorflow.keras.layers import GlobalAveragePooling1D, GlobalMaxPooling1D
 from tagger.model.JetTagModel import JetModelFactory, JetTagModel
 
 
+def initialise_tensorflow(num_threads):
+    import tensorflow as tf
+
+    os.environ["KERAS_BACKEND"] = "tf"
+
+    print("Using ")
+    print(tf.config.list_physical_devices("GPU"))
+    print("for training")
+
+    gpu = tf.config.list_physical_devices("GPU")
+    tf.config.experimental.set_memory_growth(gpu[0], True)
+
+    # Set some tensorflow constants
+    os.environ["OMP_NUM_THREADS"] = str(num_threads)
+    os.environ["TF_NUM_INTRAOP_THREADS"] = str(num_threads)
+    os.environ["TF_NUM_INTEROP_THREADS"] = str(num_threads)
+
+    tf.keras.utils.set_random_seed(46)  # not a special number
+
+
+def initialise_jax():
+    import jax
+
+    os.environ["KERAS_BACKEND"] = "jax"
+    os.environ["JAX_PLATFORMS"] = "cuda"
+
+
+def log_beta_schedule(epoch, max_epochs=100):
+    log_beta_start = np.log10(1e-7)
+    log_beta_end = np.log10(1e-4)
+    log_beta = log_beta_start + (log_beta_end - log_beta_start) * (epoch / max_epochs)
+    return 10**log_beta
+
+
+def cosine_decay_restarts(global_step, initial_learning_rate, max_epochs):
+    n_cycle = 1
+    cycle_step = global_step
+    cycle_len = max_epochs
+    while cycle_step >= cycle_len:
+        cycle_step -= cycle_len
+        cycle_len *= 1
+        n_cycle += 1
+
+    cycle_t = min(cycle_step / (cycle_len - 10), 1)
+    lr = 1.0e-6 + 0.5 * (initial_learning_rate - 1.0e-6) * (
+        1 + cos(pi * cycle_t)
+    ) * 1 ** max(n_cycle - 1, 0)
+    return lr
+
+
 class AAtt(tf.keras.layers.Layer, tfmot.sparsity.keras.PrunableLayer):
     """Attention Layer class
 
@@ -128,7 +178,9 @@ class AttentionPooling(tf.keras.layers.Layer, tfmot.sparsity.keras.PrunableLayer
         return self.score_dense._trainable_weights
 
 
-def choose_aggregator(choice: str, name: str, bits=9, bits_int=2, alpha_val=1, **common_args) -> tf.keras.layers.Layer:
+def choose_aggregator(
+    choice: str, name: str, bits=9, bits_int=2, alpha_val=1, **common_args
+) -> tf.keras.layers.Layer:
     """Choose the aggregator keras object based on an input string."""
     if choice not in ["mean", "max", "attention"]:
         raise ValueError(
@@ -140,10 +192,14 @@ def choose_aggregator(choice: str, name: str, bits=9, bits_int=2, alpha_val=1, *
     elif choice == "max":
         return GlobalMaxPooling1D(name=name)
     elif choice == "attention":
-        return AttentionPooling(name=name, bits=bits, bits_int=bits_int, alpha_val=alpha_val, **common_args)
+        return AttentionPooling(
+            name=name, bits=bits, bits_int=bits_int, alpha_val=alpha_val, **common_args
+        )
 
 
-def fromYaml(yaml_path, yaml_dict: dict, folder: str, recreate: bool = True) -> JetTagModel:
+def fromYaml(
+    yaml_path, yaml_dict: dict, folder: str, recreate: bool = True
+) -> JetTagModel:
     """Create a model directly from a yaml input file
 
     Args:
@@ -155,11 +211,11 @@ def fromYaml(yaml_path, yaml_dict: dict, folder: str, recreate: bool = True) -> 
         JetTagModel: The model
     """
 
-    #with open(yaml_path, 'r') as stream:
+    # with open(yaml_path, 'r') as stream:
     #    yaml_dict = yaml.safe_load(stream)
     # Create a model based on what is specified in the yaml 'model' field
     # Model must be registered for this to function
-    model = JetModelFactory.create_JetTagModel(yaml_dict['model'], folder)
+    model = JetModelFactory.create_JetTagModel(yaml_dict["model"], folder)
     model.load_yaml(yaml_dict)
     if recreate:
         # Remove output dir if exists
@@ -168,11 +224,13 @@ def fromYaml(yaml_path, yaml_dict: dict, folder: str, recreate: bool = True) -> 
             print(f"Re-created existing directory: {folder}.")
             # Create dir to save results
         os.makedirs(folder)
-        os.system('cp ' + yaml_path + ' ' + folder)
+        os.system("cp " + yaml_path + " " + folder)
     return model
 
 
-def fromFolder(save_path: str, yaml_dict: dict, newoutput_dir: str = "None") -> JetTagModel:
+def fromFolder(
+    save_path: str, yaml_dict: dict, newoutput_dir: str = "None"
+) -> JetTagModel:
     """Load a model from its save folder using the yaml file in the save folder
 
     Args:

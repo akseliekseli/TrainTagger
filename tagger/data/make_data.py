@@ -7,62 +7,31 @@ from tagger.data.tools import make_data
 if __name__ == "__main__":
     parser = ArgumentParser()
     # Making input arguments
+    
     parser.add_argument(
-        "-i",
-        "--input",
-        # default='/eos/cms/store/cmst3/group/l1tr/sewuchte/l1teg/fp_jettuples_090125/All200.root',
-        default="../data/cern/bbccqq_qcd.root",
-        help="Path to input training data",
+        '-i',
+        '--input',
+        default='/eos/cms/store/cmst3/group/l1tr/sewuchte/l1teg/fp_jettuples_191125_151X/All200.root',
+        help='Path to input training data',
     )
+    parser.add_argument('-r', '--ratio', default=1, type=float, help='Ratio (0-1) of the input data root file to process')
+    parser.add_argument('-s', '--step', default='100MB', help='The maximum memory size to process input root file')
     parser.add_argument(
-        "-r",
-        "--ratio",
-        default=1,
-        type=float,
-        help="Ratio (0-1) of the input data root file to process",
+        '-e', '--extras', default='extra_fields', help='Which extra fields to add to output tuples, in puppicand_fields.yml'
     )
+    parser.add_argument('-t', '--tree', default='outnano/Jets', help='Tree within the ntuple containing the jets')
+
     parser.add_argument(
-        "-s",
-        "--step",
-        default="100MB",
-        help="The maximum memory size to process input root file",
-    )
-    parser.add_argument(
-        "-e",
-        "--extras",
-        default="extra_fields",
-        help="Which extra fields to add to output tuples, in pfcand_fields.yml",
-    )
-    parser.add_argument(
-        "-t",
-        "--tree",
-        default="outnanoSC8/Jets",
-        help="Tree within the ntuple containing the jets",
+        '-sig', '--signal-processes', default=[], nargs='*', help='Specify all signal process for individual plotting'
     )
 
     parser.add_argument(
-        "-sig",
-        "--signal-processes",
-        default=[],
-        nargs="*",
-        help="Specify all signal process for individual plotting",
-    )
-    parser.add_argument(
-        "--data-outdir",
-        default="training_data/",
-        help="Folder name for the new dataset if using --make-data.",
+        '-nw', '--num_workers', default=8, type=int, help='How many threads to run the data splitting with'
     )
 
     args = parser.parse_args()
 
-    make_data(
-        infile=args.input,
-        outdir=args.data_outdir,
-        step_size=args.step,
-        extras=args.extras,
-        ratio=args.ratio,
-        tree=args.tree,
-    )
+    make_data(infile=args.input, outdir='/shared/ParT_data/training_data/', step_size=args.step, extras=args.extras, ratio=args.ratio, tree=args.tree)
 
     # Format all the signal processes used for plotting later
     for signal_process in args.signal_processes:
@@ -78,4 +47,5 @@ if __name__ == "__main__":
                 extras=args.extras,
                 ratio=args.ratio,
                 tree=args.tree,
+                num_workers = args.num_workers,
             )

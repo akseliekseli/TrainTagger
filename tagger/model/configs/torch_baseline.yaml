@@ -1,8 +1,8 @@
-model: DeepSetModel
+model: TorchDeepSetModel
 run_config :
   verbose : 2
   debug : True
-  num_threads : 24
+  num_threads : 64
 
 model_config :
   name : baseline
@@ -10,23 +10,18 @@ model_config :
   classification_layers : [32,16]
   regression_layers : [10]
   kernel_initializer : 'lecun_uniform'
-  aggregator : 'attention'
+  aggregator : 'mean'
 
 quantization_config:
-  quantizer_bits : 9
-  quantizer_bits_int : 2
-  quantizer_alpha_val : 1.0
+  input_quantization : [24,12]
   pt_output_quantization : [16,6]
 
 training_config :
   weight_method: "onlyclass"
-  epochs : 10
+  epochs : 50
   batch_size : 1024
   learning_rate : 0.001
   validation_split : 0.1
-
-  initial_sparsity : 0.0
-  final_sparsity : 0.1
 
   loss_weights : [1,1]
 
@@ -45,3 +40,4 @@ firmware_config:
   fpga_part : 'xcvu13p-flga2577-2-e'
 
   project_name: 'L1TSC4NGJetModel_test'
+

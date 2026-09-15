@@ -51,7 +51,7 @@ source setup.sh
 export Model=baseline
 
 #Prepare the data
-python tagger/make_data.py
+python tagger/data/make_data.py
 
 #Train the model
 python tagger/train/train.py -y tagger/model/configs/$Model.yaml -o output/$Model
@@ -109,13 +109,13 @@ source setup.sh
 Then, to prepare the data for training:
 
 ```
-python tagger/make_data.py
+python tagger/data/make_data.py
 ```
 
 This prepare the data using the default options(look into the script to see what the options are). If you want to customize the input data path, or the data step size for `uproot.iterate`, then you can use the full options
 
 ```
-python tagger/make_data.py --make-data -i <your-rootfile> -s <custom-step-size>
+python tagger/data/make_data.py --make-data -i <your-rootfile> -s <custom-step-size>
 ```
 
 This automatically create a new directory: `training_data` (it will ask before removing the exisiting one), and writes the data into it. Then, to train the model:
@@ -156,6 +156,10 @@ Then, these codes are synthesize again with an hls wrapper, and CMSSW:
 ------
 ## Conda Environment Notes
 
+There are two conda environments provided, environment.yml gives you a qkeras, keras v2, HGQ1, tensorflow CPU only training environment. environment-gpu.yml gives you a keras v3, HGQ2, pquant, tensorflow and pytorch GPU training environment. 
+To run the baseline training use environment.yml or use the prebuilt docker image [here](gitlab-registry.cern.ch/ml_l1/ops/docker-images/mamba_jettagger:latest)
+To run the GPU training use the GPU training environment-gpu.yml or use the prebuilt docker image [here](gitlab-registry.cern.ch/ml_l1/ops/docker-images/mamba_jettagger:latest-gpu): 
+
 To deactivate the environment:
 
 ```
@@ -173,7 +177,7 @@ Reference on conda environment here: https://docs.conda.io/projects/conda/en/lat
 
 # Adding a new model
 To add a new model class to the repo there are a number of steps needed:
-First add a MyModel.py to tagger/model
+First create a file MyModel.py in the tagger/model directory
 This python script must contain a uniquely named model class that inherits from JetTagModel and is registered with the model factory:
 ```
 @JetModelFactory.register('MyModel')
@@ -201,10 +205,13 @@ save(out_dir)
 @JetTagModel.load_decorator
 load(out_dir)
 # The load decorator is required.
-hls4ml_convert(firmware_dir, build)
-# where to save the firmware and whether or not to run the full hls4ml synthesis (needs a vitis install)
-
 ```
+OPTIONAL if you want to run firmware synthesis
+```
+firmware_convert(firmware_dir, build)
+# where to save the firmware and whether or not to run the full hls4ml synthesis (needs a vitis install)
+```
+
 
 Secondly, add your model to the `tagger/model/__init__.py` as `from tagger.model.MyModel import MyModel`
 
@@ -226,11 +233,16 @@ quantization_config:
 training_config :
   weight_method: "onlyclass"
   validation_split : 0.1
-
-hls4ml_config:
+```
+OPTIONAL if you want to run firmware synthesis
+```
+firmware_config:
   input_precision: 'ap_fixed<24,12,AP_RND,AP_SAT>'
   class_precision: 'ap_ufixed<24,12,AP_RND,AP_SAT>'
   reg_precision: 'ap_fixed<16,6,AP_RND,AP_SAT>'
+
+  clock_period : 2.5
+  fpga_part : 'xcvu13p-flga2577-2-e'
 
   project_name: 'MyModel_test'
 ```
@@ -240,6 +252,8 @@ To train your new model just specify the new yaml when training e.g.
 ```
 python tagger/train/train.py -y tagger/model/configs/mymodel.yaml -o output/mymodel
 ```
+
+Your yaml file will be validated in the pre-commit-hooks. If your config adds extra parameters that are necessary for your model variant to run add these variables in the tagger/model/configs/scheme.py file with a new elif path for your specific model type.
 
 # Continous Integration
 

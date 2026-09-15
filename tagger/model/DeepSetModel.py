@@ -10,63 +10,49 @@ import hls4ml
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
-import tensorflow_model_optimization as tfmot
+from schema import Schema, And, Use, Optional
+
+from tagger.model.common import initialise_tensorflow
+from tagger.model.JetTagModel import JetModelFactory, JetTagModel
+from tagger.model.QKerasModel import QKerasModel, AAtt, AttentionPooling, choose_aggregator
+
 from qkeras import QConv1D
 from qkeras.qlayers import QActivation, QDense
-
-# Qkeras
 from qkeras.quantizers import quantized_bits, quantized_relu
-from qkeras.utils import load_qmodel
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.layers import Activation, BatchNormalization
 
-from tagger.model.common import AAtt, AttentionPooling, choose_aggregator
-from tagger.model.JetTagModel import JetModelFactory, JetTagModel
-
-# Set some tensorflow constants
-NUM_THREADS = 24
-os.environ["OMP_NUM_THREADS"] = str(NUM_THREADS)
-os.environ["TF_NUM_INTRAOP_THREADS"] = str(NUM_THREADS)
-os.environ["TF_NUM_INTEROP_THREADS"] = str(NUM_THREADS)
-
-tf.config.threading.set_inter_op_parallelism_threads(NUM_THREADS)
-tf.config.threading.set_intra_op_parallelism_threads(NUM_THREADS)
-
-tf.keras.utils.set_random_seed(420)  # not a special number
-
-
-def categorical_focal_loss(gamma=1.0, alpha=None):
-    def loss(y_true, y_pred):
-        # Clip to prevent log(0)
-        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
-
-        # standard categorical CE: -sum(y_true * log(y_pred))
-        ce = -tf.reduce_sum(y_true * tf.math.log(y_pred), axis=-1)
-
-        # p_t: predicted probability of the true class
-        p_t = tf.reduce_sum(y_true * y_pred, axis=-1)
-
-        # alpha balance
-        if alpha is not None:
-            alpha_factor = tf.reduce_sum(y_true * alpha, axis=-1)
-        else:
-            alpha_factor = 1.0
-
-        modulating_factor = (1.0 - p_t) ** gamma
-
-        return alpha_factor * modulating_factor * ce
-
-    return loss
-
-
 # Register the model in the factory with the string name corresponding to what is in the yaml config
-@JetModelFactory.register("DeepSetModel")
-class DeepSetModel(JetTagModel):
+@JetModelFactory.register('DeepSetModel')
+class DeepSetModel(QKerasModel):
+
     """DeepSetModel class
 
     Args:
         JetTagModel (_type_): Base class of a JetTagModel
     """
+
+    schema = Schema(
+            {
+                "model": str,
+                ## generic run config coniguration
+                "run_config" : JetTagModel.run_schema,
+                "model_config" : {"name" : str,
+                                  "conv1d_layers" : list,
+                                  "classification_layers" : list,
+                                  "regression_layers" : list,
+                                  "kernel_initializer" : str,
+                                  "aggregator" : And(str, lambda s: s in  ["mean", "max", "attention"])},
+                "quantization_config" : QKerasModel.quantization_schema,
+                "training_config" : QKerasModel.training_config_schema,
+                ## generic hls4ml configuration
+                "firmware_config" : {"input_precision" : str,
+                                    "class_precision" : str,
+                                    "reg_precision": str,
+                                    "clock_period" : And(float, lambda s: 0.0 < s <= 10),
+                                    "fpga_part" : str,
+                                    "project_name" : str}
+            }
+    )
 
     def build_model(self, inputs_shape: tuple, outputs_shape: tuple):
         """build model override, makes the model layer by layer
@@ -82,274 +68,92 @@ class DeepSetModel(JetTagModel):
             aggregator: String that specifies the type of aggregator to use after the conv1D net.
         """
 
-        # Define some common arguments, taken from the yaml config
-        common_args = {
-            "kernel_quantizer": quantized_bits(
-                self.quantization_config["quantizer_bits"],
-                self.quantization_config["quantizer_bits_int"],
-                alpha=self.quantization_config["quantizer_alpha_val"],
+        initialise_tensorflow(self.run_config['num_threads'])
+
+        self.common_args = {
+            'kernel_quantizer': quantized_bits(
+                self.quantization_config['quantizer_bits'],
+                self.quantization_config['quantizer_bits_int'],
+                alpha=self.quantization_config['quantizer_alpha_val'],
             ),
-            "bias_quantizer": quantized_bits(
-                self.quantization_config["quantizer_bits"],
-                self.quantization_config["quantizer_bits_int"],
-                alpha=self.quantization_config["quantizer_alpha_val"],
+            'bias_quantizer': quantized_bits(
+                self.quantization_config['quantizer_bits'],
+                self.quantization_config['quantizer_bits_int'],
+                alpha=self.quantization_config['quantizer_alpha_val'],
             ),
-            "kernel_initializer": self.model_config["kernel_initializer"],
+            'kernel_initializer': self.model_config['kernel_initializer'],
         }
 
         # Initialize inputs
-        inputs = tf.keras.layers.Input(shape=inputs_shape, name="model_input")
+        inputs = tf.keras.layers.Input(shape=inputs_shape, name='model_input')
 
         # Main branch
-        main = BatchNormalization(name="norm_input")(inputs)
+        main = BatchNormalization(name='norm_input')(inputs)
 
         # Make Conv1D layers
-        for iconv1d, depthconv1d in enumerate(self.model_config["conv1d_layers"]):
-            main = QConv1D(
-                filters=depthconv1d,
-                kernel_size=1,
-                name="Conv1D_" + str(iconv1d + 1),
-                **common_args,
-            )(main)
+        for iconv1d, depthconv1d in enumerate(self.model_config['conv1d_layers']):
+            main = QConv1D(filters=depthconv1d, kernel_size=1, name='Conv1D_' + str(iconv1d + 1), **self.common_args)(main)
             main = QActivation(
-                activation=quantized_relu(
-                    self.quantization_config["quantizer_bits"], 0
-                ),
-                name="relu_" + str(iconv1d + 1),
+                activation=quantized_relu(self.quantization_config['quantizer_bits'], 0), name='relu_' + str(iconv1d + 1)
             )(main)
             # ToDo: fix the bits_int part later, ie use the default not 0
 
         # Linear activation to change HLS bitwidth to fix overflow in AveragePooling
-        main = QActivation(activation="quantized_bits(18,8)", name="act_pool")(main)
-        agg = choose_aggregator(choice=self.model_config["aggregator"], name="pool")
+        main = QActivation(activation='quantized_bits(18,8)', name='act_pool')(main)
+        agg = choose_aggregator(choice=self.model_config['aggregator'], name="pool")
         main = agg(main)
 
         # Now split into jet ID and pt regression
 
         # Make fully connected dense layers for classification task
-        for iclass, depthclass in enumerate(self.model_config["classification_layers"]):
+        for iclass, depthclass in enumerate(self.model_config['classification_layers']):
             if iclass == 0:
-                jet_id = QDense(
-                    depthclass,
-                    name="Dense_" + str(iclass + 1) + "_jetID",
-                    **common_args,
-                )(main)
+                jet_id = QDense(depthclass, name='Dense_' + str(iclass + 1) + '_jetID', **self.common_args)(main)
             else:
-                jet_id = QDense(
-                    depthclass,
-                    name="Dense_" + str(iclass + 1) + "_jetID",
-                    **common_args,
-                )(jet_id)
+                jet_id = QDense(depthclass, name='Dense_' + str(iclass + 1) + '_jetID', **self.common_args)(jet_id)
             jet_id = QActivation(
-                activation=quantized_relu(
-                    self.quantization_config["quantizer_bits"], 0
-                ),
-                name="relu_" + str(iclass + 1) + "_jetID",
+                activation=quantized_relu(self.quantization_config['quantizer_bits'], 0),
+                name='relu_' + str(iclass + 1) + '_jetID',
             )(jet_id)
             # ToDo: fix the bits_int part later, ie use the default not 0
 
         # Make output layer for classification task
-        jet_id = QDense(
-            outputs_shape[0], name="Dense_" + str(iclass + 2) + "_jetID", **common_args
-        )(jet_id)
-        jet_id = Activation("softmax", name="jet_id_output")(jet_id)
+        jet_id = QDense(outputs_shape[0], name='Dense_' + str(iclass + 2) + '_jetID', **self.common_args)(jet_id)
+        jet_id = Activation('softmax', name='jet_id_output')(jet_id)
 
         # Make fully connected dense layers for pt regression task
-        for ireg, depthreg in enumerate(self.model_config["regression_layers"]):
+        for ireg, depthreg in enumerate(self.model_config['regression_layers']):
             if ireg == 0:
-                pt_regress = QDense(
-                    depthreg, name="Dense_" + str(ireg + 1) + "_pT", **common_args
-                )(main)
+                pt_regress = QDense(depthreg, name='Dense_' + str(ireg + 1) + '_pT', **self.common_args)(main)
             else:
-                pt_regress = QDense(
-                    depthreg, name="Dense_" + str(ireg + 1) + "_pT", **common_args
-                )(pt_regress)
+                pt_regress = QDense(depthreg, name='Dense_' + str(ireg + 1) + '_pT', **self.common_args)(pt_regress)
             pt_regress = QActivation(
-                activation=quantized_relu(
-                    self.quantization_config["quantizer_bits"], 0
-                ),
-                name="relu_" + str(ireg + 1) + "_pT",
+                activation=quantized_relu(self.quantization_config['quantizer_bits'], 0),
+                name='relu_' + str(ireg + 1) + '_pT',
             )(pt_regress)
 
         pt_regress = QDense(
             1,
-            name="pT_output",
+            name='pT_output',
             kernel_quantizer=quantized_bits(
-                self.quantization_config["pt_output_quantization"][0],
-                self.quantization_config["pt_output_quantization"][1],
-                alpha=self.quantization_config["quantizer_alpha_val"],
+                self.quantization_config['pt_output_quantization'][0],
+                self.quantization_config['pt_output_quantization'][1],
+                alpha=self.quantization_config['quantizer_alpha_val'],
             ),
             bias_quantizer=quantized_bits(
-                self.quantization_config["pt_output_quantization"][0],
-                self.quantization_config["pt_output_quantization"][1],
-                alpha=self.quantization_config["quantizer_alpha_val"],
+                self.quantization_config['pt_output_quantization'][0],
+                self.quantization_config['pt_output_quantization'][1],
+                alpha=self.quantization_config['quantizer_alpha_val'],
             ),
-            kernel_initializer="lecun_uniform",
-        )(pt_regress)
+            kernel_initializer='lecun_uniform',
+            )(pt_regress)
 
         # Define the model using both branches
         self.jet_model = tf.keras.Model(inputs=inputs, outputs=[jet_id, pt_regress])
 
         print(self.jet_model.summary())
 
-    def _prune_model(self, num_samples: int):
-        """Pruning setup for the model, internal model function called by compile
-
-        Args:
-            num_samples (int): number of samples in the training set used for scheduling
-        """
-
-        print("Begin pruning the model...")
-
-        # Calculate the ending step for pruning
-        end_step = (
-            np.ceil(num_samples / self.training_config["batch_size"]).astype(np.int32)
-            * self.training_config["epochs"]
-        )
-
-        # Define the pruned model
-        pruning_params = {
-            "pruning_schedule": tfmot.sparsity.keras.PolynomialDecay(
-                initial_sparsity=self.training_config["initial_sparsity"],
-                final_sparsity=self.training_config["final_sparsity"],
-                begin_step=0,
-                end_step=end_step,
-            )
-        }
-        self.jet_model = tfmot.sparsity.keras.prune_low_magnitude(
-            self.jet_model, **pruning_params
-        )
-
-        # Add preface to loss name
-        self.loss_name = "prune_low_magnitude_"
-
-        # Add pruning callback
-        self.callbacks.append(tfmot.sparsity.keras.UpdatePruningStep())
-
-    def compile_model(self, num_samples: int):
-        """compile the model generating callbacks and loss function
-        Args:
-            num_samples (int): Number of samples in the training set used for scheduling
-        """
-
-        # Define the callbacks using hyperparameters in the config
-        self.callbacks = [
-            EarlyStopping(
-                monitor="val_loss",
-                patience=self.training_config["EarlyStopping_patience"],
-            ),
-            ReduceLROnPlateau(
-                monitor="val_loss",
-                factor=self.training_config["ReduceLROnPlateau_factor"],
-                patience=self.training_config["ReduceLROnPlateau_patience"],
-                min_lr=self.training_config["ReduceLROnPlateau_min_lr"],
-            ),
-        ]
-
-        # Define the pruning
-        self._prune_model(num_samples)
-        # compile the tensorflow model setting the loss and metrics
-        self.jet_model.compile(
-            optimizer=tf.keras.optimizers.Adam(
-                learning_rate=self.training_config["learning_rate"]
-            ),
-            loss={
-                self.loss_name + self.output_id_name: "categorical_crossentropy",
-                self.loss_name + self.output_pt_name: tf.keras.losses.Huber(),
-            },
-            loss_weights=self.training_config["loss_weights"],
-            metrics={
-                self.loss_name + self.output_id_name: "categorical_accuracy",
-                self.loss_name + self.output_pt_name: ["mae", "mean_squared_error"],
-            },
-            weighted_metrics={
-                self.loss_name + self.output_id_name: "categorical_accuracy",
-                self.loss_name + self.output_pt_name: ["mae", "mean_squared_error"],
-            },
-        )
-
-    def fit(
-        self,
-        X_train: npt.NDArray[np.float64],
-        y_train: npt.NDArray[np.float64],
-        pt_target_train: npt.NDArray[np.float64],
-        sample_weight: npt.NDArray[np.float64],
-    ):
-        """Fit the model to the training dataset
-
-        Args:
-            X_train (npt.NDArray[np.float64]): X train dataset
-            y_train (npt.NDArray[np.float64]): y train classification targets
-            pt_target_train (npt.NDArray[np.float64]): y train pt regression targets
-            sample_weight (npt.NDArray[np.float64]): sample weighting
-        """
-
-        # Train the model using hyperparameters in yaml config
-        self.history = self.jet_model.fit(
-            {"model_input": X_train},
-            {
-                self.loss_name + self.output_id_name: y_train,
-                self.loss_name + self.output_pt_name: pt_target_train,
-            },
-            sample_weight=sample_weight,
-            epochs=self.training_config["epochs"],
-            batch_size=self.training_config["batch_size"],
-            verbose=self.run_config["verbose"],
-            validation_split=self.training_config["validation_split"],
-            callbacks=self.callbacks,
-            shuffle=True,
-        )
-        # --- Verify pruning sparsity after training ---
-        print("\n--- Pruning sparsity check ---")
-        found_any = False
-        for layer in self.jet_model.layers:
-            if hasattr(layer, "get_prunable_weights"):
-                found_any = True
-                for w in layer.get_prunable_weights():
-                    sparsity = 1.0 - (tf.math.count_nonzero(w).numpy() / w.numpy().size)
-                    print(f"  {layer.name}: sparsity = {sparsity:.3f}")
-        if not found_any:
-            print(
-                "  WARNING: No prunable layers found — pruning wrappers may not have been applied!"
-            )
-        print("-----------------------------\n")
-
-    # Decorated with save decorator for added functionality
-    @JetTagModel.save_decorator
-    def save(self, out_dir: str = "None"):
-        """Save the model file
-
-        Args:
-            out_dir (str, optional): Where to save it if not in the output_directory. Defaults to "None".
-        """
-        # Export the model
-        model_export = tfmot.sparsity.keras.strip_pruning(self.jet_model)
-
-        os.makedirs(os.path.join(out_dir, "model"), exist_ok=True)
-        # Use keras save format !NOT .h5! due to depreciation
-        export_path = os.path.join(out_dir, "model/saved_model.keras")
-        model_export.save(export_path)
-        print(f"Model saved to {export_path}")
-
-    @JetTagModel.load_decorator
-    def load(self, out_dir: str = "None"):
-        """Load the model file
-
-        Args:
-            out_dir (str, optional): Where to load it if not in the output_directory. Defaults to "None".
-        """
-
-        # Additional custom objects for attention layers
-        custom_objects_ = {
-            "AAtt": AAtt,
-            "AttentionPooling": AttentionPooling,
-        }
-        # Load the model
-        self.jet_model = load_qmodel(
-            f"{out_dir}/model/saved_model.keras", custom_objects=custom_objects_
-        )
-
-    def hls4ml_convert(self, firmware_dir: str, build: bool = False):
+    def firmware_convert(self, firmware_dir: str, build: bool = False):
         """Run the hls4ml model conversion
 
         Args:
@@ -358,66 +162,50 @@ class DeepSetModel(JetTagModel):
         """
 
         # Remove the old directory if it exists
-        hls4ml_outdir = firmware_dir + "/" + self.hls4ml_config["project_name"]
-        os.system(f"rm -rf {hls4ml_outdir}")
+        hls4ml_outdir = firmware_dir + '/' + self.firmware_config['project_name']
+        os.system(f'rm -rf {hls4ml_outdir}')
 
         # Create default config
-        config = hls4ml.utils.config_from_keras_model(
-            self.jet_model, granularity="name", backend="Vitis"
-        )
-        config["IOType"] = "io_parallel"
-        config["LayerName"]["model_input"]["Precision"]["result"] = self.hls4ml_config[
-            "input_precision"
-        ]
+        config = hls4ml.utils.config_from_keras_model(self.jet_model, granularity='name')
+        config['IOType'] = 'io_parallel'
+        config['LayerName']['model_input']['Precision']['result'] = self.firmware_config['input_precision']
 
         # Configuration for conv1d layers
-        # hls4ml automatically figures out the paralellization factor
-        # config['LayerName']['Conv1D_1']['ParallelizationFactor'] = 8
-        # config['LayerName']['Conv1D_2']['ParallelizationFactor'] = 8
+        # hls4ml does not !!! automatically figure out the paralellization factor, this leads to csim, hdl sim errors
+        config['LayerName']['Conv1D_1']['ParallelizationFactor'] = 16
+        config['LayerName']['Conv1D_2']['ParallelizationFactor'] = 16
 
         # Additional config
         for layer in self.jet_model.layers:
             layer_name = layer.__class__.__name__
 
             if layer_name in ["BatchNormalization", "InputLayer"]:
-                config["LayerName"][layer.name]["Precision"] = self.hls4ml_config[
-                    "input_precision"
-                ]
-                config["LayerName"][layer.name]["result"] = self.hls4ml_config[
-                    "input_precision"
-                ]
+                config["LayerName"][layer.name]["Precision"] = self.firmware_config['input_precision']
+                config["LayerName"][layer.name]["result"] = self.firmware_config['input_precision']
                 config["LayerName"][layer.name]["Trace"] = not build
 
-            elif layer_name in [
-                "Permute",
-                "Concatenate",
-                "Flatten",
-                "Reshape",
-                "UpSampling1D",
-                "Add",
-            ]:
+            elif layer_name in ["Permute", "Concatenate", "Flatten", "Reshape", "UpSampling1D", "Add"]:
                 print("Skipping trace for:", layer.name)
             else:
                 config["LayerName"][layer.name]["Trace"] = not build
 
-        config["LayerName"]["jet_id_output"]["Precision"]["result"] = (
-            self.hls4ml_config["class_precision"]
-        )
+        config["LayerName"]["jet_id_output"]["Precision"]["result"] = self.firmware_config['class_precision']
         config["LayerName"]["jet_id_output"]["Implementation"] = "latency"
-        config["LayerName"]["pT_output"]["Precision"]["result"] = self.hls4ml_config[
-            "reg_precision"
-        ]
+        config["LayerName"]["pT_output"]["Precision"]["result"] = self.firmware_config['reg_precision']
         config["LayerName"]["pT_output"]["Implementation"] = "latency"
 
         # Write HLS
         self.hls_jet_model = hls4ml.converters.convert_from_keras_model(
             self.jet_model,
-            backend="Vitis",
-            project_name=self.hls4ml_config["project_name"],
-            clock_period=2.5,  # 1/360MHz = 2.8ns
+            backend='Vitis',
+            project_name=self.firmware_config['project_name'],
+            clock_period=self.firmware_config['clock_period'],
             hls_config=config,
-            output_dir=f"{hls4ml_outdir}",
-            part="xcvu13p-flga2577-2-e",
+            output_dir=f'{hls4ml_outdir}',
+            part= self.firmware_config['fpga_part'],
+            #namespace='hls4ml_'+self.firmware_config['project_name'],
+            #write_weights_txt=False,
+            #write_emulation_constants=True,
         )
 
         # Compile the project
@@ -425,45 +213,9 @@ class DeepSetModel(JetTagModel):
 
         # Save config  as json file
         print("Saving default config as config.json ...")
-        with open(hls4ml_outdir + "/config.json", "w") as fp:
+        with open(hls4ml_outdir + '/config.json', 'w') as fp:
             json.dump(config, fp)
 
         if build:
             # build the project
             self.hls_jet_model.build(csim=False, reset=True)
-
-    def load_pretrained_backbone(self, weights_path: str, freeze_epochs: int = 0):
-        """Load conv1d + norm_input weights from a ContrastivePretrainer encoder
-        (see pretrain_jetclr.py). Only layers with matching names get loaded --
-        the classification/regression heads are untouched and stay randomly
-        initialized, since they never existed in the contrastive encoder.
-
-        Args:
-            weights_path: path to encoder_weights.h5 saved by build_encoder().
-            freeze_epochs: if > 0, freeze the loaded conv1d layers so only the
-                (randomly-initialized) heads train for the first N epochs, then
-                unfreeze. NOTE: this requires calling this method BEFORE
-                compile_model(), and re-compiling after unfreezing if you use this.
-        """
-        import tensorflow as tf
-
-        # Build a throwaway model with the same names as build_encoder() so
-        # load_weights(by_name=True) can match them into self.jet_model.
-        print(f"Loading pretrained encoder weights from {weights_path} ...")
-        self.jet_model.load_weights(weights_path, by_name=True, skip_mismatch=True)
-        print(
-            "Done. Layers matched by name; classification/regression heads "
-            "(any layer name containing '_jetID' or '_pT') were skipped "
-            "since they don't exist in the pretrained encoder file."
-        )
-
-        if freeze_epochs > 0:
-            for layer in self.jet_model.layers:
-                if layer.name.startswith("Conv1D_") or layer.name in ("norm_input",):
-                    layer.trainable = False
-            print(
-                f"Froze backbone layers for the first {freeze_epochs} epochs "
-                "(you'll need to unfreeze + recompile manually after that many "
-                "epochs if you want to fine-tune the full network -- this simple "
-                "version doesn't automate the unfreeze mid-fit)."
-            )

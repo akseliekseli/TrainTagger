@@ -7,26 +7,22 @@ Written 28/05/2025 cebrown@cern.ch
 
 import os
 import shutil
-
-import tensorflow as tf
-import tensorflow_model_optimization as tfmot
 import yaml
-from qkeras.qlayers import QDense
-from tensorflow.keras.layers import GlobalAveragePooling1D, GlobalMaxPooling1D
+import numpy as np
+from math import cos, pi
+
 
 from tagger.model.JetTagModel import JetModelFactory, JetTagModel
 
-
 def initialise_tensorflow(num_threads):
     import tensorflow as tf
-
-    os.environ["KERAS_BACKEND"] = "tf"
-
+    os.environ["KERAS_BACKEND"] = "tf" 
+    
     print("Using ")
-    print(tf.config.list_physical_devices("GPU"))
+    print(tf.config.list_physical_devices('GPU'))
     print("for training")
-
-    gpu = tf.config.list_physical_devices("GPU")
+    
+    gpu = tf.config.list_physical_devices('GPU')
     tf.config.experimental.set_memory_growth(gpu[0], True)
 
     # Set some tensorflow constants
@@ -35,23 +31,20 @@ def initialise_tensorflow(num_threads):
     os.environ["TF_NUM_INTEROP_THREADS"] = str(num_threads)
 
     tf.keras.utils.set_random_seed(46)  # not a special number
-
-
+    
+    
 def initialise_jax():
     import jax
-
-    os.environ["KERAS_BACKEND"] = "jax"
-    os.environ["JAX_PLATFORMS"] = "cuda"
-
-
+    os.environ['KERAS_BACKEND'] = 'jax'
+    os.environ['JAX_PLATFORMS'] = 'cuda'
+    
 def log_beta_schedule(epoch, max_epochs=100):
     log_beta_start = np.log10(1e-7)
     log_beta_end = np.log10(1e-4)
     log_beta = log_beta_start + (log_beta_end - log_beta_start) * (epoch / max_epochs)
-    return 10**log_beta
+    return 10 ** log_beta
 
-
-def cosine_decay_restarts(global_step, initial_learning_rate, max_epochs):
+def cosine_decay_restarts(global_step,initial_learning_rate, max_epochs):
     n_cycle = 1
     cycle_step = global_step
     cycle_len = max_epochs
@@ -61,145 +54,12 @@ def cosine_decay_restarts(global_step, initial_learning_rate, max_epochs):
         n_cycle += 1
 
     cycle_t = min(cycle_step / (cycle_len - 10), 1)
-    lr = 1.0e-6 + 0.5 * (initial_learning_rate - 1.0e-6) * (
-        1 + cos(pi * cycle_t)
-    ) * 1 ** max(n_cycle - 1, 0)
+    lr = 1.e-6 + 0.5 * (initial_learning_rate - 1.e-6) * (
+                1 + cos(pi * cycle_t)
+            ) * 1 ** max(n_cycle - 1, 0)
     return lr
 
-
-class AAtt(tf.keras.layers.Layer, tfmot.sparsity.keras.PrunableLayer):
-    """Attention Layer class
-
-    Args:
-        tf.keras.layers.Layer (_type_): tensorflow layer wrapper
-        tfmot.sparsity.keras.PrunableLayer (_type_): prunable layer wrapper
-    """
-
-    def __init__(self, d_model=16, nhead=2, bits=9, bits_int=2, alpha_val=1, **kwargs):
-        super(AAtt, self).__init__(**kwargs)
-
-        self.d_model = d_model
-        self.n_head = nhead
-        self.bits = bits
-        self.bits_int = bits_int
-        self.alpha_val = alpha_val
-
-        self.qD = QDense(self.d_model, **kwargs)
-        self.kD = QDense(self.d_model, **kwargs)
-        self.vD = QDense(self.d_model, **kwargs)
-        self.outD = QDense(self.d_model, **kwargs)
-
-    def get_config(self):
-        base_config = super().get_config()
-        config = {
-            "d_model": (self.d_model),
-            "nhead": (self.n_head),
-            "bits": (self.bits),
-            "bits_int": (self.bits_int),
-            "alpha_val": (self.alpha_val),
-        }
-        return {**base_config, **config}
-
-    def call(self, input):
-        """Call the layer
-
-        Args:
-            input (_type_): input to layer
-
-        Returns:
-            _type_: Output of layer
-        """
-        input_shape = input.shape
-        shape_ = (-1, input_shape[1], self.n_head, self.d_model // self.n_head)
-        perm_ = (0, 2, 1, 3)
-
-        q = self.qD(input)
-        q = tf.reshape(q, shape=shape_)
-        q = tf.transpose(q, perm=perm_)
-
-        k = self.kD(input)
-        k = tf.reshape(k, shape=shape_)
-        k = tf.transpose(k, perm=perm_)
-
-        v = self.vD(input)
-        v = tf.reshape(v, shape=shape_)
-        v = tf.transpose(v, perm=perm_)
-
-        a = tf.matmul(q, k, transpose_b=True)
-        a = tf.nn.softmax(a / q.shape[3] ** 0.5, axis=3)
-
-        out = tf.matmul(a, v)
-        out = tf.transpose(out, perm=perm_)
-        out = tf.reshape(out, shape=(-1, input_shape[1], self.d_model))
-        out = self.outD(out)
-
-        return out
-
-    # define all prunable weights
-    def get_prunable_weights(self):
-        return (
-            self.qD._trainable_weights
-            + self.kD._trainable_weights
-            + self.vD._trainable_weights
-            + self.outD._trainable_weights
-        )
-
-
-class AttentionPooling(tf.keras.layers.Layer, tfmot.sparsity.keras.PrunableLayer):
-    """Attention Pooling layer class
-
-    Args:
-        tf.keras.layers.Layer (_type_): tensorflow layer class
-        tfmot.sparsity.keras.PrunableLayer (_type_): prunable layer class
-    """
-
-    def __init__(self, bits, bits_int, alpha_val, **kwargs):
-        super().__init__(**kwargs)
-
-        self.score_dense = QDense(1, use_bias=False, **kwargs)
-
-    def call(self, x):  # (B, N, d) -> (B,d) pooling via simple softmax
-        """Call the layer
-
-        Args:
-            x (_type_): input to layer
-
-        Returns:
-            _type_: output to layer
-        """
-        a = tf.squeeze(self.score_dense(x), axis=-1)
-        a = tf.nn.softmax(a, axis=1)
-
-        out = tf.matmul(a[:, tf.newaxis, :], x)
-        return tf.squeeze(out, axis=1)
-
-    # define all prunable weights
-    def get_prunable_weights(self):
-        return self.score_dense._trainable_weights
-
-
-def choose_aggregator(
-    choice: str, name: str, bits=9, bits_int=2, alpha_val=1, **common_args
-) -> tf.keras.layers.Layer:
-    """Choose the aggregator keras object based on an input string."""
-    if choice not in ["mean", "max", "attention"]:
-        raise ValueError(
-            "Given aggregation string is not implemented in choose_aggregator(). "
-            "See models.py and add string and corresponding object there."
-        )
-    if choice == "mean":
-        return GlobalAveragePooling1D(name=name)
-    elif choice == "max":
-        return GlobalMaxPooling1D(name=name)
-    elif choice == "attention":
-        return AttentionPooling(
-            name=name, bits=bits, bits_int=bits_int, alpha_val=alpha_val, **common_args
-        )
-
-
-def fromYaml(
-    yaml_path, yaml_dict: dict, folder: str, recreate: bool = True
-) -> JetTagModel:
+def fromYaml(yaml_path: str, folder: str, recreate: bool = True) -> JetTagModel:
     """Create a model directly from a yaml input file
 
     Args:
@@ -211,12 +71,15 @@ def fromYaml(
         JetTagModel: The model
     """
 
-    # with open(yaml_path, 'r') as stream:
-    #    yaml_dict = yaml.safe_load(stream)
+    with open(yaml_path, 'r') as stream:
+        yaml_dict = yaml.safe_load(stream)
+
     # Create a model based on what is specified in the yaml 'model' field
     # Model must be registered for this to function
-    model = JetModelFactory.create_JetTagModel(yaml_dict["model"], folder)
-    model.load_yaml(yaml_dict)
+    model = JetModelFactory.create_JetTagModel(yaml_dict['model'], folder)
+    # Validate yaml dict before loading
+    model.schema.validate(yaml_dict)
+    model.load_yaml(yaml_path)
     if recreate:
         # Remove output dir if exists
         if os.path.exists(folder):
@@ -224,13 +87,11 @@ def fromYaml(
             print(f"Re-created existing directory: {folder}.")
             # Create dir to save results
         os.makedirs(folder)
-        os.system("cp " + yaml_path + " " + folder)
+        os.system('cp ' + yaml_path + ' ' + folder)
     return model
 
 
-def fromFolder(
-    save_path: str, yaml_dict: dict, newoutput_dir: str = "None"
-) -> JetTagModel:
+def fromFolder(save_path: str, newoutput_dir: str = "None") -> JetTagModel:
     """Load a model from its save folder using the yaml file in the save folder
 
     Args:
@@ -251,6 +112,6 @@ def fromFolder(
         if file.endswith(".yaml"):
             yaml_path = os.path.join(folder, file)
 
-    model = fromYaml(yaml_path, yaml_dict, folder, recreate=recreate)
+    model = fromYaml(yaml_path, folder, recreate=recreate)
     model.load(folder)
     return model

@@ -2,6 +2,7 @@ model: DeepSetModel
 run_config :
   verbose : 2
   debug : True
+  num_threads : 64
 
 data: 'training_data/baseline_hardware_inputs/'
 
@@ -16,12 +17,12 @@ model_config :
 quantization_config:
   quantizer_bits : 9
   quantizer_bits_int : 2
-  quantizer_alpha_val : 1
+  quantizer_alpha_val : 1.0
   pt_output_quantization : [16,6]
 
 training_config :
   weight_method: "onlyclass"
-  epochs : 10
+  epochs : 300
   batch_size : 1024
   learning_rate : 0.001
   validation_split : 0.1
@@ -29,7 +30,7 @@ training_config :
   loss_weights : [1,1]
 
   initial_sparsity : 0.0
-  final_sparsity : 0.1
+  final_sparsity : 0.3
 
   EarlyStopping_patience : 10
 
@@ -37,9 +38,12 @@ training_config :
   ReduceLROnPlateau_patience : 5
   ReduceLROnPlateau_min_lr : 0.00001
 
-hls4ml_config:
+firmware_config:
   input_precision: 'ap_fixed<24,12,AP_RND,AP_SAT>'
   class_precision: 'ap_ufixed<24,12,AP_RND,AP_SAT>'
   reg_precision: 'ap_fixed<16,6,AP_RND,AP_SAT>'
 
-  project_name: 'L1TSC4NGJetModel_test'
+  clock_period : 2.5
+  fpga_part : 'xcvu13p-flga2577-2-e'
+
+  project_name: 'L1TSC4NGJetModel'

@@ -81,15 +81,19 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
 
     # Multiply by some custom class weights
     # All same weight
+    #weights_per_class = {
+    #    0: 1,  # b
+    #    1: 1,  # charm
+    #    2: 1.0,  # light
+    #    3: 1.0,  # gluon
+    #    4: 1.0,  # taup
+    #    5: 1.0,  # taum
+    #    6: 1.0,  # muon
+    #    7: 1.0,  # electron
+    #}
     weights_per_class = {
-        0: 1,  # b
-        1: 1,  # charm
-        2: 1.0,  # light
-        3: 1.0,  # gluon
-        4: 1.0,  # taup
-        5: 1.0,  # taum
-        6: 1.0,  # muon
-        7: 1.0,  # electron
+        index: 1.0
+        for index in class_labels.values()
     }
     for idx in class_labels.values():
         weights_per_class_pt_bin[idx] = weights_per_class_pt_bin[idx] * weights_per_class[idx]
@@ -118,12 +122,31 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
     return sample_weights
 
 
-def train(model, out_dir, percent, ebops):
+def train(model, out_dir, percent, ebops, data_dir):
 
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
-    data_train, _, class_labels, input_vars, extra_vars = load_data("training_data/", percentage=percent)
+    training_data_path = os.path.join(data_dir, "training_data")
+    testing_data_path = os.path.join(data_dir, "testing_data")
     
-    data_test, _, class_labels, input_vars, extra_vars = load_data("testing_data/", percentage=100)
+    data_train, _, class_labels, input_vars, extra_vars = load_data(
+        training_data_path,
+        percentage=percent,
+    )
+    
+    data_test, _, test_class_labels, test_input_vars, test_extra_vars = load_data(
+        testing_data_path,
+        percentage=100,
+    )
+    # Check that labels match to avoid any issues with for example test_data not having
+    # some classes at all etc.
+    if class_labels != test_class_labels:
+        raise ValueError("Training and testing class labels do not match")
+    
+    if input_vars != test_input_vars:
+        raise ValueError("Training and testing input variables do not match")
+    
+    if extra_vars != test_extra_vars:
+        raise ValueError("Training and testing extra variables do not match")
     
     model.set_labels(
         input_vars,
@@ -180,6 +203,11 @@ if __name__ == "__main__":
     parser.add_argument(
         '-y', '--yaml_config', default='tagger/model/configs/baseline_larger.yaml', help='YAML config for model'
     )
+    parser.add_argument(
+        "--data-dir",
+        default="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd",
+        help="Directory containing training_data/ and testing_data/",
+    )
 
     # Basic ploting
     parser.add_argument('--plot-basic', action='store_true', help='Plot all the basic performance if set')
@@ -202,4 +230,4 @@ if __name__ == "__main__":
 
     else:
         model = fromYaml(args.yaml_config, args.output)
-        train(model, args.output, args.percent, args.ebops)
+        train(model, args.output, args.percent, args.ebops, args.data_dir)

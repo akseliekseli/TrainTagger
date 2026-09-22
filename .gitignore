@@ -26,6 +26,12 @@ mlruns/**
 mlflow_*.txt
 tagger/firmware/*.json
 
+# Generated training and Condor logs
+*.out
+*.err
+*.log
+_training_out.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

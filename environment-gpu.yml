@@ -32,7 +32,5 @@ dependencies:
     - git+https://github.com/CMS-L1T-Jet-Tagging/hls4ml.git@jet_tagger_hls4ml_update
     - tensorflow[and-cuda]
     - pyparsing
-
-  - pip:
     - --extra-index-url https://download.pytorch.org/whl/cu128
     - torch==2.9.1+cu128

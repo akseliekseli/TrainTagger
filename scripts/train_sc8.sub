@@ -1,0 +1,22 @@
+universe = vanilla
+
+executable = scripts/train_sc8_condor.sh
+
+output = condor/logs/train_sc8.$(ClusterId).out
+error  = condor/logs/train_sc8.$(ClusterId).err
+log    = condor/logs/train_sc8.$(ClusterId).log
+
+request_cpus   = 16
+request_memory = 64GB
+request_disk   = 20GB
+request_gpus   = 1
+
++RequiresGPU = 1
++JobFlavour = "tomorrow"
+
+should_transfer_files = NO
+
+notification = Complete
+notify_user = akseli.suutari@cern.ch
+
+queue

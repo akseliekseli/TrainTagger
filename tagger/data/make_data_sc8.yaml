@@ -1,0 +1,35 @@
+jet_collection: sc8
+
+input:
+  #- "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v1/*/FP/fp_jettuples_151X_SC4_SC8_v1/*.root"
+  # XtoHH
+  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v1/XtoHH_MX_140To780_PU200/FP/fp_jettuples_151X_SC4_SC8_v1/*.root"
+  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v1/XtoHH_MX_500To1000_PU200/FP/fp_jettuples_151X_SC4_SC8_v1/*.root"
+  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v1/XtoHH_MX_1000To4000_PU200/FP/fp_jettuples_151X_SC4_SC8_v1/*.root"
+  # QCD
+  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v1/QCD_*/FP/fp_jettuples_151X_SC4_SC8_v1/*.root"
+output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd/"
+
+processing:
+  step_size: "500MB"
+  ratio: 1.0
+  num_workers: 8
+  n_particles: 16
+  input_tag: "baseline_hardware_inputs"
+  extras: "extra_fields"
+
+append: false
+force: false
+
+classes:
+  - H_bb
+  - H_cc
+  - H_qq
+  - H_gg
+  - QCD_bb
+  - QCD_cc
+  - QCD_b
+  - QCD_c
+  - QCD_others
+
+signal_processes: []

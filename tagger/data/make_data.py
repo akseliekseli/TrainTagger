@@ -1,49 +1,100 @@
 import os
 from argparse import ArgumentParser
 
-# Import from other modules
+import yaml
+
 from tagger.data.tools import make_data
 
+
+COLLECTIONS = {
+    "sc4": {
+        "tree": "outnano/Jets",
+        "label_branch": None,
+    },
+    "sc8": {
+        "tree": "outnanoSC8/Jets",
+        "label_branch": "sc8_label",
+    },
+}
+
+
 if __name__ == "__main__":
-
     parser = ArgumentParser()
-    # Making input arguments
-    parser.add_argument(
-        '-i',
-        '--input',
-        default='/eos/cms/store/cmst3/group/l1tr/sewuchte/l1teg/fp_jettuples_191125_151X/All200.root',
-        help='Path to input training data',
-    )
-    parser.add_argument('-r', '--ratio', default=1, type=float, help='Ratio (0-1) of the input data root file to process')
-    parser.add_argument('-s', '--step', default='100MB', help='The maximum memory size to process input root file')
-    parser.add_argument(
-        '-e', '--extras', default='extra_fields', help='Which extra fields to add to output tuples, in puppicand_fields.yml'
-    )
-    parser.add_argument('-t', '--tree', default='outnano/Jets', help='Tree within the ntuple containing the jets')
 
     parser.add_argument(
-        '-sig', '--signal-processes', default=[], nargs='*', help='Specify all signal process for individual plotting'
-    )
-
-    parser.add_argument(
-        '-nw', '--num_workers', default=8, type=int, help='How many threads to run the data splitting with'
+        "config",
+        help="Dataset YAML configuration",
     )
 
     args = parser.parse_args()
 
-    make_data(infile=args.input, outdir='/shared/ParT_data/training_data/', step_size=args.step, extras=args.extras, ratio=args.ratio, tree=args.tree)
+    with open(args.config) as stream:
+        config = yaml.safe_load(stream)
 
-    # Format all the signal processes used for plotting later
-    for signal_process in args.signal_processes:
-        signal_input = os.path.join(os.path.dirname(args.input), f"{signal_process}.root")
-        signal_output = os.path.join("signal_process_data", signal_process)
-        if not os.path.exists(signal_output):
-            make_data(
-                infile=signal_input,
-                outdir=signal_output,
-                step_size=args.step,
-                extras=args.extras,
-                ratio=args.ratio,
-                tree=args.tree,
-                num_workers = args.num_workers,
+    collection = config["jet_collection"]
+
+    if collection not in COLLECTIONS:
+        raise ValueError(
+            "jet_collection must be 'sc4' or 'sc8'"
+        )
+
+    collection_config = COLLECTIONS[collection]
+
+    make_data(
+        infile=config["input"],
+        outdir=config["output"],
+        step_size=config.get("step_size", "100MB"),
+        extras=config.get("extras", "extra_fields"),
+        ratio=config.get("ratio", 1.0),
+        tree=collection_config["tree"],
+        num_workers=config.get("num_workers", 8),
+        label_branch=collection_config[
+            "label_branch"
+        ],
+        label_classes=config.get("classes"),
+        overwrite=config.get("overwrite", False),
+    )
+
+    # Process optional signal samples after the main dataset.
+    for signal in config.get(
+        "signal_processes",
+        [],
+    ):
+        signal_output = signal["output"]
+
+        if (
+            os.path.exists(signal_output)
+            and not config.get("overwrite", False)
+        ):
+            print(
+                "Signal output exists, skipping: "
+                f"{signal_output}"
             )
+            continue
+
+        make_data(
+            infile=signal["input"],
+            outdir=signal_output,
+            step_size=config.get(
+                "step_size",
+                "100MB",
+            ),
+            extras=config.get(
+                "extras",
+                "extra_fields",
+            ),
+            ratio=config.get("ratio", 1.0),
+            tree=collection_config["tree"],
+            num_workers=config.get(
+                "num_workers",
+                8,
+            ),
+            label_branch=collection_config[
+                "label_branch"
+            ],
+            label_classes=config.get("classes"),
+            overwrite=config.get(
+                "overwrite",
+                False,
+            ),
+        )

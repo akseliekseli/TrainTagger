@@ -39,20 +39,34 @@ CMSHEADER_RIGHT = "PU 200 (14 TeV)"
 CMSHEADER_SIZE = BIGGER_SIZE
 
 CLASS_LABEL_STYLE = {
-    'b': 'b',
-    'charm': 'c',
-    'light': 'light',
-    'gluon': 'gluon',
-    'taum': '$\\tau_{h}^{-}$',
-    'taup': '$\\tau_{h}^{+}$',
-    'electron': 'Electron',
-    'muon': 'Muon',
-    'inclusive': 'Inclusive',
-    'Regression': 'Regression',
+    # SC4 labels
+    "b": "b",
+    "charm": "c",
+    "light": "light",
+    "gluon": "gluon",
+    "taum": r"$\tau_{h}^{-}$",
+    "taup": r"$\tau_{h}^{+}$",
+    "electron": "Electron",
+    "muon": "Muon",
+
+    # SC8 labels
+    "H_bb": r"$H\rightarrow b\bar{b}$",
+    "H_cc": r"$H\rightarrow c\bar{c}$",
+    "H_qq": r"$H\rightarrow q\bar{q}$",
+    "H_gg": r"$H\rightarrow gg$",
+    "QCD_bb": r"QCD $b\bar{b}$",
+    "QCD_cc": r"QCD $c\bar{c}$",
+    "QCD_b": "QCD b",
+    "QCD_c": "QCD c",
+    "QCD_others": "QCD others",
+
+    "inclusive": "Inclusive",
+    "Regression": "Regression",
     "taus": "Taus",
     "jets": "Jets (b, c, light, gluon)",
     "leptons": "Leptons (muon, electron)",
 }
+
 
 INPUT_FEATURE_STYLE = {
     'pt': '$p_T$',

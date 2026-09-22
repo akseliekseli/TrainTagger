@@ -1,4 +1,3 @@
-# Python
 import gc
 import json
 import os
@@ -30,6 +29,42 @@ def _add_response_vars(data):
     data['jet_ptRaw_div_ptGen'] = ak.nan_to_num(
         data['jet_pt_raw'] / data['jet_genmatch_pt'], copy=True, nan=0.0, posinf=0.0, neginf=0.0
     )
+
+
+def _split_sc8_labels(data, classes):
+    """Create numeric class labels from the string-valued SC8 labels."""
+
+    # The currently produced ntuples store an accumulating vector of labels.
+    # The final element is the label belonging to the current jet entry.
+    has_label = ak.num(data["sc8_label"], axis=1) > 0
+    data = data[has_label]
+    labels = data["sc8_label"][:, -1]
+
+    class_labels = {label: index for index, label in enumerate(classes)}
+    data["class_label"] = np.full(len(data), -1, dtype=np.int32)
+
+    for label, index in class_labels.items():
+        data["class_label"] = ak.where(
+            labels == label,
+            index,
+            data["class_label"],
+        )
+
+    data = data[data["class_label"] >= 0]
+
+    truth_pt = ak.nan_to_num(
+        data["jet_genmatch_pt"], nan=0, posinf=0, neginf=0
+    )
+    data["target_pt_phys"] = truth_pt
+    data["target_pt"] = np.clip(
+        ak.nan_to_num(
+            truth_pt / data["jet_pt_phys"], nan=0, posinf=0, neginf=0
+        ),
+        0.3,
+        2,
+    )
+
+    return data, class_labels
 
 def _split_flavor(data):
     """
@@ -141,6 +176,7 @@ def _split_flavor(data):
 
     return data[jet_ptmin_gen], class_labels
 
+
 def _get_puppicand_fields(tag):
 
     # Get the directory of the current file (tools.py)
@@ -205,7 +241,6 @@ def _save_chunk_metadata(metadata_file, chunk, entries, outfile):
 
     return
 
-
 def _save_dataset_metadata(outdir, class_labels, tag, extras):
 
     dataset_metadata_file = os.path.join(outdir, 'variables.json')
@@ -251,6 +286,30 @@ def _process_chunk(data_split, tag, extras, n_parts, chunk, outdir):
     gc.collect()
 
     return
+
+
+def _next_chunk(outdir):
+    metadata_file = os.path.join(outdir, "metadata.json")
+    if not os.path.exists(metadata_file):
+        return 0
+    with open(metadata_file, "r") as f:
+        return len(json.load(f))
+
+
+def _uproot_source(infile, tree):
+    """Build an Uproot source from files, directories, or wildcard patterns."""
+    if isinstance(infile, (str, bytes, os.PathLike)):
+        inputs = [infile]
+    else:
+        inputs = infile
+
+    sources = {}
+    for item in inputs:
+        item = os.fspath(item).rstrip("/")
+        if os.path.isdir(item):
+            item = os.path.join(item, "*.root")
+        sources[item] = tree
+    return sources
 
 
 # >>>>>>FUNCTIONS THAT SHOULD BE USED EXTERNALLY!<<<<<<<
@@ -326,7 +385,6 @@ def to_ML(data, class_labels):
 
     return X, y, pt_target, truth_pt, reco_pt
 
-
 def load_data(outdir, percentage, test_ratio=0.0, fields=None):
     """
     Load a specified percentage of the dataset using uproot.concatenate.
@@ -350,27 +408,24 @@ def load_data(outdir, percentage, test_ratio=0.0, fields=None):
     with open(metadata_file, "r") as f:
         metadata = json.load(f)
 
+    if not 0 < percentage <= 100:
+        raise ValueError("percentage must be between 0 and 100")
+
     total_chunks = len(metadata)
-    chunks_to_load = int(np.ceil((percentage / 100) * total_chunks))
+    if total_chunks == 0:
+        raise ValueError(f"No chunks were found in {metadata_file}")
+
+    chunks_to_load = max(1, int(np.ceil((percentage / 100) * total_chunks)))
 
     # Collect the file paths for the chunks to load
     chunk_files = [metadata[i]["file"] for i in range(chunks_to_load)]
 
     # Use uproot.concatenate to load and combine data from multiple files
-    data = uproot.concatenate(chunk_files, filter_name=fields, library="ak")
-
-    # Shuffle the data indices
-    total_data_len = len(data)
-    indices = np.arange(total_data_len)
-    np.random.shuffle(indices)
-
-    # Split indices based on test_ratio
-    # split_index = int((1 - test_ratio) * total_data_len)
-    # train_indices, test_indices = indices[:split_index], indices[split_index:]
-
-    # Split the data into training and testing sets
-    train_data = data
-    # test_data = data[test_indices]
+    data = uproot.concatenate(
+        [f"{filename}:data" for filename in chunk_files],
+        filter_name=fields,
+        library="ak",
+    )
 
     # Load corresponding metadata for classlabels/input variables
     data_metadata_file = os.path.join(outdir, "variables.json")
@@ -380,7 +435,7 @@ def load_data(outdir, percentage, test_ratio=0.0, fields=None):
         input_vars = variables['inputs']
         extra_vars = variables['extras']
 
-    return train_data, 0, class_labels, input_vars, extra_vars
+    return data, 0, class_labels, input_vars, extra_vars
 
 
 def make_data(
@@ -391,8 +446,12 @@ def make_data(
     n_parts=N_PARTICLES,
     ratio=1.0,
     step_size="100MB",
-    tree="outnano/jets",
-    num_workers=8
+    tree="outnano/Jets",
+    num_workers=8,
+    append=False,
+    force=False,
+    label_branch=None,
+    classes=None,
 ):
     """
     Process the data set in chunks from the input ntuples file.
@@ -407,48 +466,86 @@ def make_data(
         step_size (str): Step size for uproot iteration.
     """
 
+    if not 0 < ratio <= 1:
+        raise ValueError("ratio must be in (0, 1]")
+
+    source = _uproot_source(infile, tree)
+
+    entry_info = uproot.num_entries(source)
+    num_entries = sum(
+        item[-1] if isinstance(item, tuple) else item
+        for item in entry_info
+    )
+
+    if num_entries == 0:
+        raise FileNotFoundError(f"No ROOT entries found for {infile}")
+
     # Check if output dir already exists, remove if so
-    if os.path.exists(outdir):
-        confirm = input(f"The directory '{outdir}' already exists. Do you want to delete it and continue? [y/n]: ")
-        if confirm.lower() == 'y':
+    if os.path.exists(outdir) and not append:
+        if force:
             shutil.rmtree(outdir)
-            print(f"Deleted existing directory: {outdir}")
         else:
-            print("Exiting without making changes.")
-            return
+            confirm = input(f"The directory '{outdir}' already exists. Do you want to delete it and continue? [y/n]: ")
+            if confirm.lower() == 'y':
+                shutil.rmtree(outdir)
+                print(f"Deleted existing directory: {outdir}")
+            else:
+                print("Exiting without making changes.")
+                return
 
     # Create output training dataset
     os.makedirs(outdir, exist_ok=True)
     print("Output directory:", outdir)
 
-    # Loop through the entries
-    num_entries = uproot.open(infile)[tree].num_entries
-    print(num_entries)
+    print("Input entries:", num_entries)
     num_entries_done = 0
-    chunk = 0
+    chunk = _next_chunk(outdir) if append else 0
 
-    for data in (pbar := tqdm(uproot.iterate(infile, filter_name=FILTER_PATTERN, how="zip", step_size=step_size, max_workers=num_workers))):
-        pbar.set_description(f'Processing chunk {chunk}')
+    filters = [FILTER_PATTERN]
+    if label_branch is not None:
+        filters.append(label_branch)
 
-        num_entries_done += len(data)  # count before cuts
+    iterator = uproot.iterate(
+        source,
+        filter_name=filters,
+        how="zip",
+        step_size=step_size,
+        num_workers=num_workers,
+    )
 
-        # Define jet kinematic cuts
-        jet_cut = (data['jet_pt_phys'] > 15) & (np.abs(data['jet_eta_phys']) < 2.4) & (data['jet_reject'] == 0)
-        data = data[jet_cut]
+    with tqdm(total=num_entries, unit="jets") as pbar:
+        for data in iterator:
+            pbar.set_description(f'Processing chunk {chunk}')
+            entries_this_chunk = len(data)
+            num_entries_done += entries_this_chunk
+            pbar.update(entries_this_chunk)
 
-        # Add additional response variables
-        # _add_response_vars(data)
-        # Split data into all the training classes
-        data_split, class_labels = _split_flavor(data)
+            jet_cut = (
+                (data['jet_pt_phys'] > 15)
+                & (np.abs(data['jet_eta_phys']) < 2.4)
+                & (data['jet_reject'] == 0)
+            )
+            data = data[jet_cut]
 
-        # If first chunk then save metadata of the dataset
-        if chunk == 0:
-            _save_dataset_metadata(outdir, class_labels, tag, extras)
+            if label_branch is None:
+                data_split, class_labels = _split_flavor(data)
+            else:
+                data_split, class_labels = _split_sc8_labels(data, classes)
 
-        # Process and save training data for a given feature set
-        _process_chunk(data_split, tag=tag, extras=extras, n_parts=n_parts, chunk=chunk, outdir=outdir)
+            if not os.path.exists(os.path.join(outdir, "variables.json")):
+                _save_dataset_metadata(outdir, class_labels, tag, extras)
 
-        # Number of chunk for indexing files
-        chunk += 1
-        if num_entries_done / num_entries >= ratio:
-            break
+            if len(data_split) > 0:
+                _process_chunk(
+                    data_split,
+                    tag=tag,
+                    extras=extras,
+                    n_parts=n_parts,
+                    chunk=chunk,
+                    outdir=outdir,
+                )
+                chunk += 1
+
+            if num_entries_done / num_entries >= ratio:
+                break
+

@@ -140,6 +140,16 @@ def ROC_binary(y_pred, y_test, class_labels, plot_dir, class_pair, signal_proc=N
     y_true1, y_true2 = y_test[:, idx1], y_test[:, idx2]
     y_score1, y_score2 = y_pred[:, idx1], y_pred[:, idx2]
 
+    # Skip if no jets in either class
+    n_class1 = int(np.sum(y_true1))
+    n_class2 = int(np.sum(y_true2))
+    if n_class1 == 0 or n_class2 == 0:
+        print(
+            f"Skipping ROC {class_pair[0]} vs {class_pair[1]}: "
+            f"{n_class1} and {n_class2} test jets"
+        )
+        return
+
     # Combine the labels and scores for binary classification
     selection = (y_true1 == 1) | (y_true2 == 1)
     y_true_binary = y_true1[selection]
@@ -181,7 +191,7 @@ def ROC_binary(y_pred, y_test, class_labels, plot_dir, class_pair, signal_proc=N
 def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
     # Create a colormap for unique colors
     # Use 'tab10' with enough colors
-    colormap = cm.get_cmap('Set1', len(class_labels))
+    colormap = plt.get_cmap("Set1", len(class_labels))
 
     # Create a plot for ROC curves
     fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
@@ -192,6 +202,16 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
         # Extract the one-hot column for the current class
         y_true = y_test[:, i]
         y_score = y_pred[:, i]  # Predicted probabilities for the current class
+
+        # Skip if missing classes
+        n_positive = int(np.sum(y_true))
+        n_negative = len(y_true) - n_positive
+        if n_positive == 0 or n_negative == 0:
+            print(
+                f"Skipping ROC for {class_label}: "
+                f"{n_positive} positive and {n_negative} negative jets"
+            )
+            continue
 
         # Compute FPR, TPR, and AUC
         fpr, tpr, _ = roc_curve(y_true, y_score)
@@ -245,6 +265,7 @@ def confusion(y_pred, y_test, class_labels, plot_dir):
     cm = confusion_matrix(
         np.argmax(y_test, axis=1),
         np.argmax(y_pred, axis=1),
+        labels=np.arange(len(class_labels)),
         normalize="true",
     )
     cm = np.round(cm, 3)
@@ -661,7 +682,7 @@ def shapPlot(shap_values, feature_names, class_names):
     axis_color = "#333333"
     class_inds = np.argsort([-np.abs(shap_values[i]).mean() for i in range(len(shap_values))])
     # Use 'tab10' with enough colors
-    colormap = cm.get_cmap('Set1', len(class_names))
+    colormap = plt.get_cmap("Set1", len(class_labels))
 
     for i, ind in enumerate(class_inds):
         global_shap_values = np.abs(shap_values[ind]).mean(0)
@@ -774,14 +795,28 @@ def efficiency(y_pred, y_test, reco_pt_test, class_labels, plot_dir):
         plt.close()
 
     eff_selection = {
-        'taus': [class_labels['taup'], class_labels['taum']],
-        'b': [class_labels['b']],
+        label: [index]
+        for label, index in class_labels.items()
+        if np.sum(y_test[:, index]) > 0
     }
 
     for key in eff_selection.keys():
         selection = sum(y_test[:, idx] for idx in eff_selection[key]) > 0
         summed_y_true = sum(y_test[:, idx] for idx in eff_selection[key])
         summed_y_score = sum(y_pred[:, idx] for idx in eff_selection[key])
+
+        n_positive = int(np.sum(summed_y_true))
+        n_negative = len(summed_y_true) - n_positive
+    
+        if n_positive == 0 or n_negative == 0:
+            print(
+                f"Skipping efficiency for {key}: "
+                f"{n_positive} positive and "
+                f"{n_negative} negative jets"
+            )
+            continue
+    
+        selection = summed_y_true > 0
 
         # Compute FPR, TPR, and AUC
         fpr, tpr, thres = roc_curve(summed_y_true, summed_y_score)
@@ -925,7 +960,8 @@ def basic(model, signal_dirs):
 
     plot_dir = os.path.join(model.output_directory, "plots/training")
 
-    ROC_dict = {class_label: 0 for class_label in model.class_labels}
+    # ROC_dict = {class_label: 0 for class_label in model.class_labels}
+    ROC_dict = {}
 
     # Load the testing data
     X_test = np.load(f"{model.output_directory}/testing_data/X_test.npy")
@@ -937,7 +973,7 @@ def basic(model, signal_dirs):
     
     hgq.utils.minmax_trace.trace_minmax(model.jet_model, X_test[0:1000],verbose=2)
     
-    y_pred = model_outputs[0]
+    y_pred, pt_ratio = model_outputs[0], model_outputs[1]
      # Plot ROC curves
     ROC_dict = ROC(y_pred, y_test, model.class_labels, plot_dir, ROC_dict)
     class_pairs = []
@@ -959,7 +995,23 @@ def basic(model, signal_dirs):
         ROC_binary(y_p, y_t, model.class_labels, binary_dir, class_pair, process_label)
     # Add light vs b/charm/gluon combined plot
     binary_dir_test = os.path.join(plot_dir, "test_set") 
-    ROC_jets(y_p, y_t, model.class_labels, binary_dir_test, process_label)
+    
+    
+    # Run ROC_jets only with the sc4 classes
+    sc4_jet_classes = {
+        "light",
+        "b",
+        "charm",
+        "gluon",
+    }
+    if sc4_jet_classes.issubset(model.class_labels):
+        ROC_jets(
+            y_p,
+            y_t,
+            model.class_labels,
+            binary_dir_test,
+            process_label,
+        )
 
 
     # # Get classification outputs
@@ -1010,16 +1062,16 @@ def basic(model, signal_dirs):
     #         ROC_taus(sample_preds, sample_labels, model.class_labels, binary_dir_full, process_label)
 
     # # Efficiencies
-    # efficiency(y_pred, y_test, reco_pt_test, model.class_labels, plot_dir)
+    efficiency(y_pred, y_test, reco_pt_test, model.class_labels, plot_dir)
 
     # # Confusion matrix
-    # confusion(y_pred, y_test, model.class_labels, plot_dir)
+    confusion(y_pred, y_test, model.class_labels, plot_dir)
 
     # # Plot pt corrections
-    # pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir)
+    pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir)
 
     # # Plot input distributions
-    # plot_input_vars(X_test, y_test, model.input_vars, model.class_labels, plot_dir)
+    plot_input_vars(X_test, y_test, model.input_vars, model.class_labels, plot_dir)
 
     # # Plot inclusive response and individual flavor
     # response(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
@@ -1028,6 +1080,6 @@ def basic(model, signal_dirs):
     # rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # # Plot the shaply feature importance
-    # plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
+    plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
 
     return ROC_dict

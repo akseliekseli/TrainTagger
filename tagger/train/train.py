@@ -3,6 +3,8 @@ from argparse import ArgumentParser
 
 # Third parties
 import numpy as np
+import awkward as ak
+import yaml
 
 # Import from other modules
 from tagger.data.tools import load_data, to_ML
@@ -121,44 +123,176 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
         return None
     return sample_weights
 
+def apply_class_config(
+    data_train,
+    data_test,
+    source_class_labels,
+    class_config_path,
+):
+    with open(class_config_path) as handle:
+        config = yaml.safe_load(handle)
 
-def train(model, out_dir, percent, ebops, data_dir):
+    class_groups = config["classes"]
+
+    if not isinstance(class_groups, dict):
+        raise ValueError(
+            "'classes' in the class configuration must be a mapping"
+        )
+
+    known_labels = set(source_class_labels)
+    already_used = set()
+    active_groups = []
+
+    for output_label, source_labels in class_groups.items():
+        if not isinstance(source_labels, list) or not source_labels:
+            raise ValueError(
+                f"Class group '{output_label}' must contain a list"
+            )
+
+        unknown = set(source_labels) - known_labels
+        if unknown:
+            raise ValueError(
+                f"Unknown source labels in '{output_label}': "
+                f"{sorted(unknown)}"
+            )
+
+        duplicated = set(source_labels) & already_used
+        if duplicated:
+            raise ValueError(
+                f"Source labels occur in more than one group: "
+                f"{sorted(duplicated)}"
+            )
+
+        already_used.update(source_labels)
+
+        train_mask = ak.zeros_like(
+            data_train["class_label"],
+            dtype=bool,
+        )
+        test_mask = ak.zeros_like(
+            data_test["class_label"],
+            dtype=bool,
+        )
+
+        for source_label in source_labels:
+            old_index = source_class_labels[source_label]
+
+            train_mask = train_mask | (
+                data_train["class_label"] == old_index
+            )
+            test_mask = test_mask | (
+                data_test["class_label"] == old_index
+            )
+
+        train_count = int(ak.sum(train_mask))
+        test_count = int(ak.sum(test_mask))
+
+        print(
+            f"{output_label}: "
+            f"{train_count} training jets, "
+            f"{test_count} testing jets"
+        )
+
+        if train_count == 0:
+            print(
+                f"Skipping configured class '{output_label}' "
+                "because it has no training entries"
+            )
+            continue
+
+        active_groups.append((output_label, source_labels))
+
+    if len(active_groups) < 2:
+        raise ValueError(
+            "The class configuration produced fewer than two "
+            "non-empty classes"
+        )
+
+    output_class_labels = {
+        output_label: new_index
+        for new_index, (output_label, _) in enumerate(active_groups)
+    }
+
+    def remap(data):
+        new_labels = ak.full_like(
+            data["class_label"],
+            -1,
+            dtype=np.int64,
+        )
+
+        for new_index, (_, source_labels) in enumerate(active_groups):
+            group_mask = ak.zeros_like(
+                data["class_label"],
+                dtype=bool,
+            )
+
+            for source_label in source_labels:
+                old_index = source_class_labels[source_label]
+                group_mask = group_mask | (
+                    data["class_label"] == old_index
+                )
+
+            new_labels = ak.where(
+                group_mask,
+                new_index,
+                new_labels,
+            )
+
+        # Drop jets whose labels were not included in the configuration.
+        keep = new_labels >= 0
+
+        return ak.with_field(
+            data[keep],
+            new_labels[keep],
+            "class_label",
+        )
+
+    data_train = remap(data_train)
+    data_test = remap(data_test)
+
+    print("Final model classes:", output_class_labels)
+
+    return data_train, data_test, output_class_labels
+
+
+def train(model, out_dir, percent, ebops, data_dir, class_config):
 
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
     training_data_path = os.path.join(data_dir, "training_data")
     testing_data_path = os.path.join(data_dir, "testing_data")
     
-    data_train, _, class_labels, input_vars, extra_vars = load_data(
-        training_data_path,
-        percentage=percent,
+    data_train, _, source_labels, input_vars, extra_vars = load_data(
+        training_data_path, percentage=percent
+    )
+    data_test, _, test_source_labels, test_input_vars, test_extra_vars = load_data(
+        testing_data_path, percentage=percent
     )
     
-    data_test, _, test_class_labels, test_input_vars, test_extra_vars = load_data(
-        testing_data_path,
-        percentage=100,
+    if source_labels != test_source_labels:
+        raise ValueError("Training and testing class mappings differ")
+    
+    data_train, data_test, class_labels = apply_class_config(
+        data_train,
+        data_test,
+        source_labels,
+        class_config,
     )
-    # Check that labels match to avoid any issues with for example test_data not having
-    # some classes at all etc.
-    if class_labels != test_class_labels:
-        raise ValueError("Training and testing class labels do not match")
     
-    if input_vars != test_input_vars:
-        raise ValueError("Training and testing input variables do not match")
+    print("Model output classes:", class_labels)
+    assert len(class_labels) == 5
     
-    if extra_vars != test_extra_vars:
-        raise ValueError("Training and testing extra variables do not match")
+    model.set_labels(input_vars, extra_vars, class_labels)
     
-    model.set_labels(
-        input_vars,
-        extra_vars,
-        class_labels,
+    X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train = to_ML(
+        data_train, class_labels
     )
+    X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(
+        data_test, class_labels
+    )
+    # BUG:This is for debugging class config 
+    assert y_train.shape[1] == 5
+    assert y_test.shape[1] == 5
 
-    # Make into ML-like data for training
-    X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train = to_ML(data_train, class_labels)
-
-    # Save X_test, y_test, and truth_pt_test for plotting later
-    X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(data_test, class_labels)
     save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
 
     # Calculate the sample weights for training
@@ -219,6 +353,11 @@ if __name__ == "__main__":
         '-e', '--ebops', default=300000, type=int
     )
 
+    parser.add_argument(
+        "--class-config",
+        default=None,
+        help="YAML configuration defining how source labels are grouped",
+    )
 
     args = parser.parse_args()
 
@@ -230,4 +369,4 @@ if __name__ == "__main__":
 
     else:
         model = fromYaml(args.yaml_config, args.output)
-        train(model, args.output, args.percent, args.ebops, args.data_dir)
+        train(model, args.output, args.percent, args.ebops, args.data_dir, args.class_config)

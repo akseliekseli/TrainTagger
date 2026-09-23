@@ -1,0 +1,12 @@
+classes:
+  H_bb:
+    - H_bb
+  H_cc:
+    - H_cc
+  H_qq:
+    - H_qq
+  H_gg:
+    - H_gg
+
+  QCD:
+    - QCD_others

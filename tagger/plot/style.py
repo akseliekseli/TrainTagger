@@ -59,6 +59,7 @@ CLASS_LABEL_STYLE = {
     "QCD_b": "QCD b",
     "QCD_c": "QCD c",
     "QCD_others": "QCD others",
+    "QCD": "QCD",
 
     "inclusive": "Inclusive",
     "Regression": "Regression",

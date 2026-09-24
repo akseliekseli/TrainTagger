@@ -22,7 +22,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
 
     parser.add_argument(
-        "config",
+        "--config",
         help="Dataset YAML configuration",
     )
 
@@ -51,8 +51,7 @@ if __name__ == "__main__":
         label_branch=collection_config[
             "label_branch"
         ],
-        label_classes=config.get("classes"),
-        overwrite=config.get("overwrite", False),
+        force=config.get("force", False),
     )
 
     # Process optional signal samples after the main dataset.
@@ -64,7 +63,7 @@ if __name__ == "__main__":
 
         if (
             os.path.exists(signal_output)
-            and not config.get("overwrite", False)
+            and not config.get("force", False)
         ):
             print(
                 "Signal output exists, skipping: "
@@ -92,9 +91,8 @@ if __name__ == "__main__":
             label_branch=collection_config[
                 "label_branch"
             ],
-            label_classes=config.get("classes"),
-            overwrite=config.get(
-                "overwrite",
+            force=config.get(
+                "force",
                 False,
             ),
         )

@@ -1,3 +1,4 @@
+# Python
 import gc
 import json
 import os
@@ -7,7 +8,6 @@ import awkward as ak
 
 # Third party
 import numpy as np
-
 import uproot
 import yaml
 from tqdm import tqdm
@@ -17,7 +17,9 @@ from .config import EXTRA_FIELDS, FILTER_PATTERN, INPUT_TAG, N_PARTICLES
 
 gc.set_threshold(0)
 
+
 # >>>>>>>>>>>>>>>>>>>PRIVATE FUNCTIONS<<<<<<<<<<<<<<<<<<<<<<
+
 
 def _add_response_vars(data):
     data['jet_ptUncorr_div_ptGen'] = ak.nan_to_num(
@@ -30,56 +32,52 @@ def _add_response_vars(data):
         data['jet_pt_raw'] / data['jet_genmatch_pt'], copy=True, nan=0.0, posinf=0.0, neginf=0.0
     )
 
-
-def _split_sc8_labels(data, classes):
-    """Create numeric class labels from the string-valued SC8 labels."""
-
-    # The currently produced ntuples store an accumulating vector of labels.
-    # The final element is the label belonging to the current jet entry.
-    has_label = ak.num(data["sc8_label"], axis=1) > 0
-    data = data[has_label]
-    labels = data["sc8_label"][:, -1]
-
-    class_labels = {label: index for index, label in enumerate(classes)}
-    data["class_label"] = np.full(len(data), -1, dtype=np.int32)
-
-    for label, index in class_labels.items():
-        data["class_label"] = ak.where(
-            labels == label,
-            index,
-            data["class_label"],
+def _split_sc8_labels(data, label_branch, class_labels):
+    # Expect one label per jet in the corrected ntuples.
+    counts = ak.num(data[label_branch], axis=1)
+    if not bool(ak.all(counts == 1)):
+        raise ValueError(
+            f"Expected exactly one label per jet in {label_branch}. "
+            "Found empty or multiple-label entries."
         )
 
-    data = data[data["class_label"] >= 0]
+    labels = ak.to_list(data[label_branch][:, 0])
+
+    # Extend the SAME mapping across chunks; never renumber earlier labels.
+    for label in labels:
+        if label not in class_labels:
+            class_labels[label] = len(class_labels)
+
+    data["class_label"] = np.asarray(
+        [class_labels[label] for label in labels],
+        dtype=np.int32,
+    )
 
     truth_pt = ak.nan_to_num(
-        data["jet_genmatch_pt"], nan=0, posinf=0, neginf=0
+        data["jet_genmatch_pt"],
+        nan=0,
+        posinf=0,
+        neginf=0,
     )
+    
     data["target_pt_phys"] = truth_pt
+    
     data["target_pt"] = np.clip(
         ak.nan_to_num(
-            truth_pt / data["jet_pt_phys"], nan=0, posinf=0, neginf=0
+            truth_pt / data["jet_pt_phys"],
+            nan=0,
+            posinf=0,
+            neginf=0,
         ),
         0.3,
         2,
     )
-
     return data, class_labels
 
 def _split_flavor(data):
-    """
-    Splits data by particle flavor and applies conditions for each category. Also creates the pT target.
-
-    Parameters:
-        data (awkward array): The input data to split.
-
-    Returns:
-        dict: A dictionary containing the split data by label.
-    """
-
+    """Split data by particle flavor and create the classification/pT targets."""
     genmatch_pt_base = data['jet_genmatch_pt'] > 0
 
-    # Define conditions for each label
     conditions = {
         "b": (
             genmatch_pt_base
@@ -87,14 +85,14 @@ def _split_flavor(data):
             & (data['jet_tauflav'] == 0)
             & (data['jet_elflav'] == 0)
             & (data['jet_genmatch_hflav'] == 5)
-        ),  # Bottom
+        ),
         "charm": (
             genmatch_pt_base
             & (data['jet_muflav'] == 0)
             & (data['jet_tauflav'] == 0)
             & (data['jet_elflav'] == 0)
             & (data['jet_genmatch_hflav'] == 4)
-        ),  # Charm
+        ),
         "light": (
             genmatch_pt_base
             & (data['jet_muflav'] == 0)
@@ -107,7 +105,7 @@ def _split_flavor(data):
                 | (abs(data['jet_genmatch_pflav']) == 2)
                 | (abs(data['jet_genmatch_pflav']) == 3)
             )
-        ),  # uds
+        ),
         "gluon": (
             genmatch_pt_base
             & (data['jet_muflav'] == 0)
@@ -115,177 +113,142 @@ def _split_flavor(data):
             & (data['jet_elflav'] == 0)
             & (data['jet_genmatch_hflav'] == 0)
             & (data['jet_genmatch_pflav'] == 21)
-        ),  # Gluon
+        ),
         "taup": (
             genmatch_pt_base
             & (data['jet_muflav'] == 0)
             & (data['jet_tauflav'] == 1)
             & (data['jet_taucharge'] > 0)
             & (data['jet_elflav'] == 0)
-        ),  # Tau +
+        ),
         "taum": (
             genmatch_pt_base
             & (data['jet_muflav'] == 0)
             & (data['jet_tauflav'] == 1)
             & (data['jet_taucharge'] < 0)
             & (data['jet_elflav'] == 0)
-        ),  # Tau -
+        ),
         "muon": (
-            genmatch_pt_base & (data['jet_muflav'] == 1) & (data['jet_tauflav'] == 0) & (data['jet_elflav'] == 0)
-        ),  # muon
+            genmatch_pt_base
+            & (data['jet_muflav'] == 1)
+            & (data['jet_tauflav'] == 0)
+            & (data['jet_elflav'] == 0)
+        ),
         "electron": (
-            genmatch_pt_base & (data['jet_muflav'] == 0) & (data['jet_tauflav'] == 0) & (data['jet_elflav'] == 1)
-        ),  # electron
+            genmatch_pt_base
+            & (data['jet_muflav'] == 0)
+            & (data['jet_tauflav'] == 0)
+            & (data['jet_elflav'] == 1)
+        ),
     }
 
-    # Automatically generate class labels based on the order of keys in conditions
     class_labels = {label: idx for idx, label in enumerate(conditions)}
-
-    # Initialize the new array in data for numeric labels with default -1 for unmatched entries
     data['class_label'] = ak.full_like(data['jet_genmatch_pt'], -1)
-
-    # Assign numeric values based on conditions using awkward's where function
     for label, condition in conditions.items():
         data['class_label'] = ak.where(condition, class_labels[label], data['class_label'])
 
-    # Set pt regression target
     hadrons = conditions["b"] | conditions["charm"] | conditions["light"] | conditions["gluon"]
     leptons = conditions["taup"] | conditions["taum"] | conditions["muon"] | conditions["electron"]
 
     hadron_pt_ratio = ak.nan_to_num(data["jet_genmatch_pt"] / data["jet_pt_phys"], nan=0, posinf=0, neginf=0)
-    lepton_pt_ratio = ak.nan_to_num((data["jet_genmatch_lep_vis_pt"] / data["jet_pt_phys"]), nan=0, posinf=0, neginf=0)
-
+    lepton_pt_ratio = ak.nan_to_num(
+        data["jet_genmatch_lep_vis_pt"] / data["jet_pt_phys"], nan=0, posinf=0, neginf=0
+    )
     hadron_pt = ak.nan_to_num(data["jet_genmatch_pt"], nan=0, posinf=0, neginf=0)
-    lepton_pt = ak.nan_to_num((data["jet_genmatch_lep_vis_pt"]), nan=0, posinf=0, neginf=0)
+    lepton_pt = ak.nan_to_num(data["jet_genmatch_lep_vis_pt"], nan=0, posinf=0, neginf=0)
 
     data['target_pt'] = np.clip(hadrons * hadron_pt_ratio + leptons * lepton_pt_ratio, 0.3, 2)
     data['target_pt_phys'] = hadrons * hadron_pt + leptons * lepton_pt
 
-    # Apply pt_cut
     jet_ptmin_gen = data['target_pt_phys'] > 5.0
     for key in conditions:
         conditions[key] = conditions[key] & jet_ptmin_gen
 
-    # Sanity check for data consistency
-    split_data_sum = sum(sum(conditions[label]) for label, condition in conditions.items())
+    split_data_sum = sum(sum(conditions[label]) for label in conditions)
     if split_data_sum != len(data[jet_ptmin_gen]):
         raise ValueError(
-            f"""Data splitting error: Total entries ({split_data_sum})
-            do not match the filtered data length ({len(data[jet_ptmin_gen])})."""
+            f"Data splitting error: Total entries ({split_data_sum}) "
+            f"do not match the filtered data length ({len(data[jet_ptmin_gen])})."
         )
 
     return data[jet_ptmin_gen], class_labels
 
 
 def _get_puppicand_fields(tag):
-
-    # Get the directory of the current file (tools.py)
     current_dir = os.path.dirname(__file__)
-
-    # Construct the path to puppicand_fields.yml relative to tools.py
     puppicand_fields_path = os.path.join(current_dir, "puppicand_fields.yml")
-
-    # Load the YAML file as a dictionary
     with open(puppicand_fields_path, "r") as file:
         puppicand_fields = yaml.safe_load(file)
-
     return puppicand_fields[tag]
 
 
-
 def _pad_fill(array, target):
-    '''
-    pad an array to target length and then fill it with 0s
-    '''
+    """Pad an array to target length and fill missing values with zero."""
     return ak.fill_none(ak.pad_none(array, target, axis=1, clip=True), 0)
 
 
 def _make_nn_inputs(data_split, tag, n_parts):
-
     features = _get_puppicand_fields(tag)
-    # Concatenate all the inputs
+    puppicands = data_split["jet_puppicand"]
+    available_fields = set(ak.fields(puppicands))
     inputs_list = []
 
-    # Vertically stacked them to create input sets
-    # https://awkward-array.org/doc/main/user-guide/how-to-restructure-concatenate.html
-    # Also pad and fill them with 0 to the number of constituents we are using (nconstit)
     for field in features:
-        field_array = data_split["jet_puppicand"][field]
+        if field not in available_fields:
+            raise ValueError(
+                f"Constituent feature {field!r} from tag {tag!r} was not found "
+                f"inside jet_puppicand. Available fields: "
+                f"{sorted(available_fields)}"
+            )
 
+        field_array = puppicands[field]
         padded_filled_array = _pad_fill(field_array, n_parts)
         inputs_list.append(padded_filled_array[:, :, np.newaxis])
 
-    # batch_size, n_particles, n_features
-    inputs = ak.concatenate(inputs_list, axis=2)
-    data_split['nn_inputs'] = inputs
-
-    return
-
+    data_split["nn_inputs"] = ak.concatenate(inputs_list, axis=2)
 
 def _save_chunk_metadata(metadata_file, chunk, entries, outfile):
-
     chunk_info = {"chunk": chunk, "entries": entries, "file": outfile}
-
-    # Load existing metadata or start a new list
     if os.path.exists(metadata_file):
         with open(metadata_file, "r") as f:
             content = f.read()
             metadata = json.loads(content) if content.strip() else []
     else:
         metadata = []
-
     metadata.append(chunk_info)
-
     with open(metadata_file, "w") as f:
         json.dump(metadata, f, indent=4)
 
-    return
 
 def _save_dataset_metadata(outdir, class_labels, tag, extras):
-
     dataset_metadata_file = os.path.join(outdir, 'variables.json')
-
     metadata = {
         "outputs": class_labels,
         "inputs": _get_puppicand_fields(tag),
         "extras": _get_puppicand_fields(extras),
     }
-
     with open(dataset_metadata_file, "w") as f:
         json.dump(metadata, f, indent=4)
 
-    return
-
 
 def _process_chunk(data_split, tag, extras, n_parts, chunk, outdir):
-    """
-    Process chunk of data_split to save/parse it for training datasets
-    """
+    """Process and save one chunk of data."""
+    if len(data_split) == 0:
+        return
 
-    # Create the NN inputs
     _make_nn_inputs(data_split, tag, n_parts)
     extra_features = _get_puppicand_fields(extras)
-
-    # Save them to a root file
     save_fields = ['nn_inputs', 'class_label', 'target_pt', 'target_pt_phys'] + extra_features
-
-    # Filter the data_split to only include save_fields
     filtered_data = {field: data_split[field] for field in save_fields}
 
-    # Save chunk to files
-    outfile = os.path.join(outdir, f'data_chunk_{chunk}.root')
+    outfile = os.path.abspath(os.path.join(outdir, f'data_chunk_{chunk}.root'))
     with uproot.recreate(outfile) as f:
         f["data"] = filtered_data
 
-    # Log metadata
     metadata_file = os.path.join(outdir, "metadata.json")
-    _save_chunk_metadata(metadata_file, chunk, len(data_split), outfile)  # Chunk, Entries, Outfile
-
+    _save_chunk_metadata(metadata_file, chunk, len(data_split), outfile)
     del data_split, filtered_data, outfile
-    # Delete the variables to save memory
     gc.collect()
-
-    return
 
 
 def _next_chunk(outdir):
@@ -297,12 +260,15 @@ def _next_chunk(outdir):
 
 
 def _uproot_source(infile, tree):
-    """Build an Uproot source from files, directories, or wildcard patterns."""
+    """ Build an Uproot source from one or more files/directories/patterns.
+
+        Supports both data/sample_1/*.root and data/*/*.root paths 
+    """
+
     if isinstance(infile, (str, bytes, os.PathLike)):
         inputs = [infile]
     else:
         inputs = infile
-
     sources = {}
     for item in inputs:
         item = os.fspath(item).rstrip("/")
@@ -311,123 +277,56 @@ def _uproot_source(infile, tree):
         sources[item] = tree
     return sources
 
-
 # >>>>>>FUNCTIONS THAT SHOULD BE USED EXTERNALLY!<<<<<<<
 
 
 def extract_array(tree, field, entry_stop):
-    """
-    Extracts an array from the tree with a limit on the number of entries.
-    """
+    """Extract an array from the tree with a limit on the number of entries."""
     return tree[field].array(entry_stop=entry_stop)
 
 
 def extract_nn_inputs(data, input_vars, n_parts=16, n_entries=None):
-    """
-    Extract nn inputs based on the input_vars list
-    """
-
-    # Concatenate all the inputs
+    """Extract NN inputs based on the input_vars list."""
     inputs_list = []
-
     for field in input_vars:
-
         field_array = extract_array(data, f"jet_puppicand_{field}", n_entries)
-
         padded_filled_array = _pad_fill(field_array, n_parts)
         inputs_list.append(padded_filled_array[:, :, np.newaxis])
-
-    # batch_size, n_particles, n_features
-    inputs = ak.concatenate(inputs_list, axis=2)
-
-    return inputs
+    return ak.concatenate(inputs_list, axis=2)
 
 
 def group_id_values(event_id, *arrays, num_elements=2):
-    '''
-    Group values according to event id.
-    Filter out events that has less than num_elements
-    '''
-
-    # Use ak.argsort to sort based on event_id
+    """Group values by event ID and remove groups with too few elements."""
     sorted_indices = ak.argsort(event_id)
     sorted_event_id = event_id[sorted_indices]
-
-    # Find unique event_ids and counts manually
-    unique_event_id, counts = np.unique(sorted_event_id, return_counts=True)
-
-    # Use ak.unflatten to group the arrays by counts
+    _, counts = np.unique(sorted_event_id, return_counts=True)
     grouped_id = ak.unflatten(sorted_event_id, counts)
     grouped_arrays = [ak.unflatten(arr[sorted_indices], counts) for arr in arrays]
-
-    # Filter out groups that don't have at least num_elements elements
     mask = ak.num(grouped_id) >= num_elements
     filtered_grouped_arrays = [arr[mask] for arr in grouped_arrays]
-
     return grouped_id[mask], filtered_grouped_arrays
 
 
 def to_ML(data, class_labels):
-    """
-    Take in the data from make_data (loaded by load_data) and make them ready for training.
-    """
-
+    """Convert data made by make_data into arrays ready for training."""
     X = np.asarray(data['nn_inputs'])
-    
     labels = np.asarray(data['class_label'], dtype=int)
     num_classes = len(class_labels)
-
-    # One-hot encode using NumPy
     y = np.eye(num_classes)[labels]
     pt_target = np.asarray(data['target_pt'])
     truth_pt = np.asarray(data['target_pt_phys'])
     reco_pt = np.asarray(data['jet_pt_phys'])
-
     return X, y, pt_target, truth_pt, reco_pt
 
-def load_data(outdir, percentage, test_ratio=0.0, fields=None):
-    """
-    Load a specified percentage of the dataset using uproot.concatenate.
-
-    Parameters:
-        outdir (str): The output directory containing the data chunks.
-        percentage (float): The percentage of TOTAL data to load (0-100).
-        test_ratio (float): how much of the total data would be used for testing (0-1)
-        fields (list, optional): Specific fields to load. If None, load all fields.
-
-    Returns:
-        awkward.Array: Concatenated data arrays from selected chunks.
-    """
-
-    print("Loading data from: ", outdir)
-    print("Loading percentage: ", percentage)
-    print("With test ratio of: ", test_ratio)
-
-    # Load metadata to determine chunks to load
-    metadata_file = os.path.join(outdir, "metadata.json")
-    with open(metadata_file, "r") as f:
-        metadata = json.load(f)
-
-    if not 0 < percentage <= 100:
-        raise ValueError("percentage must be between 0 and 100")
-
-    total_chunks = len(metadata)
-    if total_chunks == 0:
-        raise ValueError(f"No chunks were found in {metadata_file}")
-
-    chunks_to_load = max(1, int(np.ceil((percentage / 100) * total_chunks)))
-
-    # Collect the file paths for the chunks to load
+    chunks_to_load = int(np.ceil((percentage / 100) * total_chunks))
     chunk_files = [metadata[i]["file"] for i in range(chunks_to_load)]
-
-    # Use uproot.concatenate to load and combine data from multiple files
     data = uproot.concatenate(
-        [f"{filename}:data" for filename in chunk_files],
-        filter_name=fields,
-        library="ak",
+        [f"{file}:data" for file in chunk_files], filter_name=fields, library="ak"
     )
 
-    # Load corresponding metadata for classlabels/input variables
+    indices = np.arange(len(data))
+    np.random.shuffle(indices)
+
     data_metadata_file = os.path.join(outdir, "variables.json")
     with open(data_metadata_file, "r") as f:
         variables = json.load(f)
@@ -439,8 +338,8 @@ def load_data(outdir, percentage, test_ratio=0.0, fields=None):
 
 
 def make_data(
-    infile='/eos/cms/store/cmst3/group/l1tr/sewuchte/l1teg/fp_ntuples_v131Xv9/baselineTRK_4param_221124/All200.root',
-    outdir='training_data/',
+    infile=...,
+    outdir="training_data/",
     tag=INPUT_TAG,
     extras=EXTRA_FIELDS,
     n_parts=N_PARTICLES,
@@ -450,37 +349,11 @@ def make_data(
     num_workers=8,
     append=False,
     force=False,
-    label_branch=None,
     classes=None,
-):
-    """
-    Process the data set in chunks from the input ntuples file.
-
-    Parameters:
-        infile (str): The input file path.
-        outdir (str): The output directory.
-        tag (str): Input tags to use from puppicands, defined in puppicand_fields.yml.
-        extras (str): Extra fields to store for plotting, defined in puppicand_fields.yml
-        n_parts (int): Number of constituent particles to use for tagging.
-        fraction (float) : fraction from (0-1) of data to process for training/testing
-        step_size (str): Step size for uproot iteration.
-    """
-
-    if not 0 < ratio <= 1:
-        raise ValueError("ratio must be in (0, 1]")
+    label_branch=None,
+    ):
 
     source = _uproot_source(infile, tree)
-
-    entry_info = uproot.num_entries(source)
-    num_entries = sum(
-        item[-1] if isinstance(item, tuple) else item
-        for item in entry_info
-    )
-
-    if num_entries == 0:
-        raise FileNotFoundError(f"No ROOT entries found for {infile}")
-
-    # Check if output dir already exists, remove if so
     if os.path.exists(outdir) and not append:
         if force:
             shutil.rmtree(outdir)
@@ -493,10 +366,14 @@ def make_data(
                 print("Exiting without making changes.")
                 return
 
-    # Create output training dataset
     os.makedirs(outdir, exist_ok=True)
     print("Output directory:", outdir)
 
+    entry_info = uproot.num_entries(source)
+    num_entries = sum(
+        item[-1] if isinstance(item, tuple) else item
+        for item in entry_info
+    )
     print("Input entries:", num_entries)
     num_entries_done = 0
     chunk = _next_chunk(outdir) if append else 0
@@ -512,40 +389,65 @@ def make_data(
         step_size=step_size,
         num_workers=num_workers,
     )
-
+    class_labels = {}
     with tqdm(total=num_entries, unit="jets") as pbar:
         for data in iterator:
             pbar.set_description(f'Processing chunk {chunk}')
-            entries_this_chunk = len(data)
-            num_entries_done += entries_this_chunk
-            pbar.update(entries_this_chunk)
+            num_entries_done += len(data)
 
             jet_cut = (
                 (data['jet_pt_phys'] > 15)
                 & (np.abs(data['jet_eta_phys']) < 2.4)
                 & (data['jet_reject'] == 0)
             )
+            
             data = data[jet_cut]
 
             if label_branch is None:
                 data_split, class_labels = _split_flavor(data)
             else:
-                data_split, class_labels = _split_sc8_labels(data, classes)
+                data_split, class_labels = _split_sc8_labels(
+                    data,
+                    label_branch,
+                    class_labels,
+                )
 
-            if not os.path.exists(os.path.join(outdir, "variables.json")):
-                _save_dataset_metadata(outdir, class_labels, tag, extras)
+            _save_dataset_metadata(outdir, class_labels, tag, extras)
 
             if len(data_split) > 0:
-                _process_chunk(
-                    data_split,
-                    tag=tag,
-                    extras=extras,
-                    n_parts=n_parts,
-                    chunk=chunk,
-                    outdir=outdir,
-                )
+                _process_chunk(data_split, tag, extras, n_parts, chunk, outdir)
                 chunk += 1
-
             if num_entries_done / num_entries >= ratio:
                 break
 
+def make_data_from_config(config_file, force=False):
+    """Process every dataset folder from a YAML configuration."""
+    with open(config_file, "r") as f:
+        config = yaml.safe_load(f)
+
+    output_dir = os.path.expandvars(os.path.expanduser(config['output_dir']))
+    train_dir = os.path.join(output_dir, "training_data")
+
+    if os.path.exists(output_dir):
+        if not force:
+            raise FileExistsError(f"{output_dir} already exists; use --force to replace it")
+        shutil.rmtree(output_dir)
+
+    datasets = config.get('datasets', [])
+    if not datasets:
+        raise ValueError("No datasets were provided in the YAML config")
+
+    for dataset_number, dataset in enumerate(datasets):
+        print(f"Processing dataset: {dataset['name']} ({dataset['path']})")
+        make_data(
+            infile=dataset['path'],
+            outdir=train_dir,
+            tag=config.get('tag', INPUT_TAG),
+            extras=config.get('extras', EXTRA_FIELDS),
+            n_parts=int(config.get('n_parts', N_PARTICLES)),
+            ratio=float(config.get('ratio', 1.0)),
+            step_size=config.get('step_size', '100MB'),
+            tree=config.get('tree', 'outnano/Jets'),
+            num_workers=int(config.get('num_workers', 8)),
+            append=True,
+        )

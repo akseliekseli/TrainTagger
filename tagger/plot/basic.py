@@ -1071,7 +1071,7 @@ def basic(model, signal_dirs):
     pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir)
 
     # # Plot input distributions
-    plot_input_vars(X_test, y_test, model.input_vars, model.class_labels, plot_dir)
+    # plot_input_vars(X_test, y_test, model.input_vars, model.class_labels, plot_dir)
 
     # # Plot inclusive response and individual flavor
     # response(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
@@ -1080,6 +1080,6 @@ def basic(model, signal_dirs):
     # rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # # Plot the shaply feature importance
-    plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
+    # plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
 
     return ROC_dict

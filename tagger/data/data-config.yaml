@@ -20,6 +20,8 @@ processing:
 
 append: false
 force: false
+test_split: 0.2
+random_seed: 42
 
 classes:
   - H_bb

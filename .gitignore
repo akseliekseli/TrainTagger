@@ -1,4 +1,6 @@
 #Custom things:
+condor/
+scripts/
 datasets_*
 error*
 out/

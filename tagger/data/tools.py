@@ -337,6 +337,81 @@ def to_ML(data, class_labels):
     return data, 0, class_labels, input_vars, extra_vars
 
 
+def load_data(outdir, percentage, test_ratio=0.0, fields=None):
+    """
+    Load a specified percentage of the dataset using uproot.concatenate.
+
+    Parameters:
+        outdir (str): The output directory containing the data chunks.
+        percentage (float): The percentage of TOTAL data to load (0-100).
+        test_ratio (float): how much of the total data would be used for testing (0-1)
+        fields (list, optional): Specific fields to load. If None, load all fields.
+
+    Returns:
+        awkward.Array: Concatenated data arrays from selected chunks.
+    """
+
+    print("Loading data from: ", outdir)
+    print("Loading percentage: ", percentage)
+    print("With test ratio of: ", test_ratio)
+
+    # Load metadata to determine chunks to load
+    metadata_file = os.path.join(outdir, "metadata.json")
+    with open(metadata_file, "r") as f:
+        metadata = json.load(f)
+
+    if not 0 < percentage <= 100:
+        raise ValueError("percentage must be between 0 and 100")
+
+    total_chunks = len(metadata)
+    if total_chunks == 0:
+        raise ValueError(f"No chunks were found in {metadata_file}")
+
+    chunks_to_load = max(1, int(np.ceil((percentage / 100) * total_chunks)))
+
+    # Collect the file paths for the chunks to load
+    chunk_files = [metadata[i]["file"] for i in range(chunks_to_load)]
+
+    # Use uproot.concatenate to load and combine data from multiple files
+    # data = uproot.concatenate(
+    #     [f"{filename}:data" for filename in chunk_files],
+    #     filter_name=fields,
+    #     library="ak",
+    # )
+
+    print("Uproot version:", uproot.__version__, flush=True)
+
+    parts = []
+    
+    for filename in chunk_files:
+        print(f"Reading: {filename}", flush=True)
+    
+        with uproot.open(
+            filename,
+            object_cache=None,
+            array_cache=None,
+        ) as root_file:
+            part = root_file["data"].arrays(
+                filter_name=fields,
+                library="ak",
+            )
+    
+        parts.append(part)
+    
+    data = ak.concatenate(parts, axis=0)
+    del parts
+
+    # Load corresponding metadata for classlabels/input variables
+    data_metadata_file = os.path.join(outdir, "variables.json")
+    with open(data_metadata_file, "r") as f:
+        variables = json.load(f)
+        class_labels = variables['outputs']
+        input_vars = variables['inputs']
+        extra_vars = variables['extras']
+
+    return data, 0, class_labels, input_vars, extra_vars
+
+
 def make_data(
     infile=...,
     outdir="training_data/",
@@ -351,6 +426,8 @@ def make_data(
     force=False,
     classes=None,
     label_branch=None,
+    test_split=0.2,
+    random_seed=42,
     ):
 
     source = _uproot_source(infile, tree)
@@ -389,6 +466,16 @@ def make_data(
         step_size=step_size,
         num_workers=num_workers,
     )
+
+    rng = np.random.default_rng(random_seed)
+    train_dir = os.path.join(outdir, "training_data")
+    test_dir = os.path.join(outdir, "testing_data")
+    for directory in (train_dir, test_dir):
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, "metadata.json"), "w") as f:
+            json.dump([], f)
+    train_chunk = 0
+    test_chunk = 0
     class_labels = {}
     with tqdm(total=num_entries, unit="jets") as pbar:
         for data in iterator:
@@ -412,13 +499,29 @@ def make_data(
                     class_labels,
                 )
 
-            _save_dataset_metadata(outdir, class_labels, tag, extras)
+            is_test = rng.random(len(data_split)) < test_split
 
-            if len(data_split) > 0:
-                _process_chunk(data_split, tag, extras, n_parts, chunk, outdir)
-                chunk += 1
+            train_data = data_split[~is_test]
+            test_data = data_split[is_test]
+            
+            if len(train_data):
+                _process_chunk(
+                    train_data, tag, extras, n_parts, train_chunk, train_dir
+                )
+                train_chunk += 1
+            
+            if len(test_data):
+                _process_chunk(
+                    test_data, tag, extras, n_parts, test_chunk, test_dir
+                )
+                test_chunk += 1
+            
+            chunk += 1
+
             if num_entries_done / num_entries >= ratio:
                 break
+    _save_dataset_metadata(train_dir, class_labels, tag, extras)
+    _save_dataset_metadata(test_dir, class_labels, tag, extras)
 
 def make_data_from_config(config_file, force=False):
     """Process every dataset folder from a YAML configuration."""

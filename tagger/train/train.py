@@ -25,7 +25,7 @@ def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
     print(f"Test data saved to {out_dir}")
 
 
-def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
+def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, reco_mass_train=None, debug=False):
     """
     Re-balancing the class weights and then flatten them based on truth pT
     """
@@ -63,7 +63,50 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
 
     # Weight all to one base class (b = 0)
     counts_per_bin = class_pt_counts[0]
-
+    
+    if weightingMethod == "ptmassref":
+        if reco_mass_train is None:
+            raise ValueError("ptmassref requires reco_mass_train")
+    
+        # Starting bins only: inspect your SC8 distributions and adjust.
+        pt_bins = np.array([15, 30, 50, 80, 120, 200, 350, np.inf])
+        mass_bins = np.array([0, 40, 70, 90, 110, 130, 150, 180, 220, np.inf])
+    
+        counts = {}
+        for idx in class_labels.values():
+            mask = y_train[:, idx] == 1
+            if not np.any(mask):
+                raise ValueError(f"Class {idx} has no training jets")
+            counts[idx], _, _ = np.histogram2d(
+                reco_pt_train[mask], reco_mass_train[mask],
+                bins=(pt_bins, mass_bins),
+            )
+    
+        # Use only (pT, mass) bins populated by every class.
+        target = np.minimum.reduce(list(counts.values()))
+        if not np.any(target):
+            raise ValueError("No common (pT, mass) bins; use coarser bins")
+    
+        pt_bin = np.searchsorted(pt_bins, reco_pt_train, side="right") - 1
+        mass_bin = np.searchsorted(mass_bins, reco_mass_train, side="right") - 1
+        valid = (
+            (pt_bin >= 0) & (pt_bin < len(pt_bins) - 1)
+            & (mass_bin >= 0) & (mass_bin < len(mass_bins) - 1)
+        )
+    
+        weights = np.zeros(len(y_train))
+        for idx in class_labels.values():
+            mask = (y_train[:, idx] == 1) & valid
+            weights[mask] = (
+                target[pt_bin[mask], mass_bin[mask]]
+                / counts[idx][pt_bin[mask], mass_bin[mask]]
+            )
+    
+        if debug:
+            print("Jets with nonzero pT–mass weight:",
+                  np.count_nonzero(weights), "/", len(weights))
+        return weights / weights.mean()
+    
     if weightingMethod == "ptref":
         # Try minimum and flat
         counts_per_bin = [min(min_counts_per_bin) for __ in min_counts_per_bin]
@@ -279,7 +322,6 @@ def train(model, out_dir, percent, ebops, data_dir, class_config):
     )
     
     print("Model output classes:", class_labels)
-    assert len(class_labels) == 5
     
     model.set_labels(input_vars, extra_vars, class_labels)
     
@@ -289,12 +331,10 @@ def train(model, out_dir, percent, ebops, data_dir, class_config):
     X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(
         data_test, class_labels
     )
-    # BUG:This is for debugging class config 
-    assert y_train.shape[1] == 5
-    assert y_test.shape[1] == 5
-
+    
     save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
 
+    reco_mass_train = np.asarray(data_train["jet_mass_phys"])
     # Calculate the sample weights for training
     sample_weight = train_weights(
         y_train,
@@ -302,6 +342,7 @@ def train(model, out_dir, percent, ebops, data_dir, class_config):
         class_labels,
         weightingMethod=model.training_config['weight_method'],
         debug=model.run_config['debug'],
+        reco_mass_train=reco_mass_train,
     )
     if model.run_config['debug']:
         print("DEBUG - Checking sample_weight:")

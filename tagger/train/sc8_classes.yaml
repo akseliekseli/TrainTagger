@@ -7,6 +7,13 @@ classes:
     - H_qq
   H_gg:
     - H_gg
-
-  QCD:
+  QCD_bb:
+    - QCD_bb
+  QCD_b:
+    - QCD_b
+  QCD_cc:
+    - QCD_cc
+  QCD_c:
+    - QCD_c
+  QCD_others:
     - QCD_others

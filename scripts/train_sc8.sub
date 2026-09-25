@@ -12,7 +12,7 @@ request_disk   = 20GB
 request_gpus   = 1
 
 +RequiresGPU = 1
-+JobFlavour = "workday"
++JobFlavour = "longlunch"
 
 should_transfer_files = NO
 

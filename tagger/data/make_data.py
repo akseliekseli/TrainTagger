@@ -52,6 +52,8 @@ if __name__ == "__main__":
             "label_branch"
         ],
         force=config.get("force", False),
+        test_split=config.get("test_split", 0.2),
+        random_seed=config.get("random_seed", 42),
     )
 
     # Process optional signal samples after the main dataset.
@@ -95,4 +97,6 @@ if __name__ == "__main__":
                 "force",
                 False,
             ),
+            test_split=config.get("test_split", 0.2),
+            random_seed=config.get("random_seed", 42),
         )

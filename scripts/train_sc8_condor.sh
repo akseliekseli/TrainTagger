@@ -3,11 +3,11 @@ set -euo pipefail
 
 REPOSITORY="/eos/home-a/asuutari/projects/TrainTagger"
 PYTHON="/eos/home-a/asuutari/conda-envs/tagger/bin/python"
-DATA_DIR="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd"
+DATA_DIR="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-v2"
 CLASS_CONFIG="${REPOSITORY}/tagger/train/sc8_classes.yaml"
 
 PERCENT=100
-MODEL_DIR="/eos/home-a/asuutari/projects/TrainTagger/output/baseline_sc8_HGQ2"
+MODEL_DIR="/eos/home-a/asuutari/projects/TrainTagger/output/baseline_sc8_mlpmix_HGQ2"
 
 cd "${REPOSITORY}"
 
@@ -35,17 +35,14 @@ if not gpus:
     raise RuntimeError("No GPU is visible to TensorFlow")
 PY
 
-echo "Starting training at $(date)"
-
 "${PYTHON}" -u -m tagger.train.train \
-    --yaml_config tagger/model/configs/baseline_sc8_HGQ2.yaml \
+    --yaml_config tagger/model/configs/MLPmixer_HGQ2.yaml \
     --data-dir "${DATA_DIR}" \
     --class-config "${CLASS_CONFIG}" \
     --output "${MODEL_DIR}" \
     --percent "${PERCENT}" \
     --ebops 300000
 
-echo "Training completed at $(date)"
 echo "Starting plotting"
 
 "${PYTHON}" -u -m tagger.train.train \

@@ -75,6 +75,8 @@ INPUT_FEATURE_STYLE = {
     'pt_log': '$log(p_T)$',
     'deta': '$\\Delta\\eta$',
     'dphi': '$\\Delta\\phi$',
+    "eta": "$\\eta$",
+    "phi": "$\\phi",
     'mass': 'mass',
     'isPhoton': 'PID: photon',
     'isElectronPlus': 'PID: electron +',

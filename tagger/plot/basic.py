@@ -196,7 +196,9 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
     # Create a plot for ROC curves
     fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
     hep.cms.label(llabel=style.CMSHEADER_LEFT, rlabel=style.CMSHEADER_RIGHT, ax=ax, fontsize=style.CMSHEADER_SIZE)
-    for i, class_label in enumerate(class_labels):
+    for class_label, i in sorted(
+        class_labels.items(), key=lambda item: item[1]
+    ):
 
         # Get true labels and predicted probabilities for the current class
         # Extract the one-hot column for the current class
@@ -320,6 +322,7 @@ def plot_input_vars(X_test, y_test, input_vars, class_labels, plot_dir):
     save_dir = os.path.join(plot_dir, 'inputs')
     os.makedirs(save_dir, exist_ok=True)
 
+    print(input_vars)
     is_filled = (X_test[:, :, 16] == 1)
     for i in range(len(input_vars)):
         inputs = []
@@ -1071,15 +1074,15 @@ def basic(model, signal_dirs):
     pt_correction_hist(pt_ratio, truth_pt_test, reco_pt_test, plot_dir)
 
     # # Plot input distributions
-    # plot_input_vars(X_test, y_test, model.input_vars, model.class_labels, plot_dir)
+    plot_input_vars(X_test, y_test, model.input_vars, model.class_labels, plot_dir)
 
     # # Plot inclusive response and individual flavor
     # response(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # # Plot the rms of the residuals vs pt
-    # rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
+    rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # # Plot the shaply feature importance
-    # plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
+    plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
 
     return ROC_dict

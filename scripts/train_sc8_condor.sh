@@ -3,11 +3,11 @@ set -euo pipefail
 
 REPOSITORY="/eos/home-a/asuutari/projects/TrainTagger"
 PYTHON="/eos/home-a/asuutari/conda-envs/tagger/bin/python"
-DATA_DIR="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-v2"
+DATA_DIR="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation"
 CLASS_CONFIG="${REPOSITORY}/tagger/train/sc8_classes.yaml"
 
 PERCENT=100
-MODEL_DIR="/eos/home-a/asuutari/projects/TrainTagger/output/baseline_sc8_mlpmix_HGQ2"
+MODEL_DIR="/eos/home-a/asuutari/projects/TrainTagger/output/sc8_jedilinear_larger"
 
 cd "${REPOSITORY}"
 
@@ -36,8 +36,11 @@ if not gpus:
 PY
 
 "${PYTHON}" -u -m tagger.train.train \
-    --yaml_config tagger/model/configs/MLPmixer_HGQ2.yaml \
+    --yaml_config tagger/model/configs/JEDIlinear_HGQ2.yaml \
     --data-dir "${DATA_DIR}" \
+    --test-data-dirs \
+    /eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/XtoHH \
+    /eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/MinBias \
     --class-config "${CLASS_CONFIG}" \
     --output "${MODEL_DIR}" \
     --percent "${PERCENT}" \

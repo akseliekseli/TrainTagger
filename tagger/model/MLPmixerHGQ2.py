@@ -38,7 +38,7 @@ class MLPmixerHGQ2(JetTagModel):
 
                 "quantization_config" : {'pt_output_quantization' : list},
 
-                "training_config" :     {"weight_method" : And(str, lambda s: s in  ["none", "ptref", "onlyclass"]),
+                "training_config" :     {"weight_method" : And(str, lambda s: s in  ["none", "ptref", "onlyclass", "massref","ptmassref"]),
                                          "validation_split" : And(float, lambda s: s > 0.0),
                                          "epochs" : And(int, lambda s: s >= 1),
                                          "batch_size" : And(int, lambda s: s >= 1),

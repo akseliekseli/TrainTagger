@@ -20,83 +20,49 @@ COLLECTIONS = {
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-
-    parser.add_argument(
-        "--config",
-        help="Dataset YAML configuration",
-    )
-
+    parser.add_argument("--config", required=True)
     args = parser.parse_args()
 
     with open(args.config) as stream:
         config = yaml.safe_load(stream)
 
-    collection = config["jet_collection"]
+    collection = COLLECTIONS[config["jet_collection"]]
+    processing = config.get("processing", {})
 
-    if collection not in COLLECTIONS:
-        raise ValueError(
-            "jet_collection must be 'sc4' or 'sc8'"
-        )
+    common = {
+        "tree": collection["tree"],
+        "label_branch": collection["label_branch"],
+        "classes": config.get("classes"),
+        "tag": processing.get(
+            "input_tag", "baseline_hardware_inputs"
+        ),
+        "extras": processing.get("extras", "extra_fields"),
+        "n_parts": processing.get("n_particles", 16),
+        "step_size": processing.get("step_size", "100MB"),
+        "num_workers": processing.get("num_workers", 8),
+    }
 
-    collection_config = COLLECTIONS[collection]
-
+    # Process the main training dataset
     make_data(
         infile=config["input"],
         outdir=config["output"],
-        step_size=config.get("step_size", "100MB"),
-        extras=config.get("extras", "extra_fields"),
-        ratio=config.get("ratio", 1.0),
-        tree=collection_config["tree"],
-        num_workers=config.get("num_workers", 8),
-        label_branch=collection_config[
-            "label_branch"
-        ],
-        force=config.get("force", False),
-        test_split=config.get("test_split", 0.2),
-        random_seed=config.get("random_seed", 42),
+        ratio=processing.get("ratio", 1.0),
+        **common,
     )
 
-    # Process optional signal samples after the main dataset.
-    for signal in config.get(
-        "signal_processes",
-        [],
-    ):
-        signal_output = signal["output"]
-
-        if (
-            os.path.exists(signal_output)
-            and not config.get("force", False)
-        ):
+    # Separate samples for evaluation.
+    for signal in config.get("signal_processes", []):
+        if os.path.exists(signal["output"]):
             print(
-                "Signal output exists, skipping: "
-                f"{signal_output}"
+                f"Signal output exists, skipping: {signal['output']}"
             )
             continue
 
         make_data(
             infile=signal["input"],
-            outdir=signal_output,
-            step_size=config.get(
-                "step_size",
-                "100MB",
-            ),
-            extras=config.get(
-                "extras",
-                "extra_fields",
-            ),
-            ratio=config.get("ratio", 1.0),
-            tree=collection_config["tree"],
-            num_workers=config.get(
-                "num_workers",
-                8,
-            ),
-            label_branch=collection_config[
-                "label_branch"
-            ],
-            force=config.get(
-                "force",
-                False,
-            ),
-            test_split=config.get("test_split", 0.2),
-            random_seed=config.get("random_seed", 42),
+            outdir=signal["output"],
+            ratio=signal.get("ratio", 1.0),
+            pt_min=signal.get("pt_min"),
+            pt_max=signal.get("pt_max"),
+            **common,
         )

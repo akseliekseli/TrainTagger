@@ -1,3 +1,4 @@
+import gc
 import os
 from argparse import ArgumentParser
 
@@ -27,15 +28,88 @@ def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
 
 def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, reco_mass_train=None, debug=False):
     """
-    Re-balancing the class weights and then flatten them based on truth pT
+    Re-balancing the class weights and then flatten them based on truth pT or mass
     """
-    if weightingMethod not in ["none", "ptref", "onlyclass"]:
+    if weightingMethod not in ["none", "ptref", "onlyclass", "massref","ptmassref"]:
         raise ValueError(
-            "Oops!  Given weightingMethod not defined in train_weights(). Use either none, ptref, or onlyclass."
+            "weightingMethod must be none, ptref, onlyclass, massref, or ptmassref"
         )
+    if weightingMethod == "none":
+        return None
+    
     num_samples = y_train.shape[0]
 
     sample_weights = np.ones(num_samples)
+
+    if weightingMethod == "massref":
+        if reco_mass_train is None:
+            raise ValueError("massref requires reco_mass_train")
+    
+        mass = np.asarray(reco_mass_train)
+    
+        if mass.ndim != 1 or len(mass) != len(y_train):
+            raise ValueError("Expected one reconstructed mass per training jet")
+    
+        # Starting bin choices, in GeV.
+        mass_bins = np.array(
+            [0, 40, 70, 90, 110, 130, 150, 180, 220, np.inf]
+        )
+        valid = np.isfinite(mass) & (mass >= mass_bins[0])
+    
+        counts = {}
+        for label, idx in class_labels.items():
+            mask = (y_train[:, idx] == 1) & valid
+            if not np.any(mask):
+                raise ValueError(
+                    f"Class {label} has no jets with valid mass"
+                )
+            counts[idx], _ = np.histogram(
+                mass[mask], bins=mass_bins
+            )
+    
+        # Give every class the same weighted mass histogram.
+        target = np.minimum.reduce(list(counts.values()))
+    
+        if not np.any(target > 0):
+            raise ValueError(
+                "No mass bins populated by every class. "
+                "Use coarser mass bins or review the class selection."
+            )
+    
+        mass_bin = np.searchsorted(
+            mass_bins, mass, side="right"
+        ) - 1
+    
+        weights = np.zeros(len(y_train), dtype=np.float32)
+    
+        for idx in class_labels.values():
+            mask = (y_train[:, idx] == 1) & valid
+            bins = mass_bin[mask]
+            weights[mask] = target[bins] / counts[idx][bins]
+    
+        mean_weight = weights.mean(dtype=np.float64)
+        if not np.isfinite(mean_weight) or mean_weight <= 0:
+            raise ValueError("Invalid mass weights")
+    
+        weights /= mean_weight
+    
+        if debug:
+            print(
+                "Jets with nonzero mass weight:",
+                np.count_nonzero(weights),
+                "/",
+                len(weights),
+            )
+            for label, idx in class_labels.items():
+                mask = (y_train[:, idx] == 1) & valid
+                histogram, _ = np.histogram(
+                    mass[mask],
+                    bins=mass_bins,
+                    weights=weights[mask],
+                )
+                print(f"{label}: weighted mass counts = {histogram}")
+    
+        return weights
 
     # Define pT bins (without the high pT part we don't care about)
     pt_bins = np.array(
@@ -298,22 +372,41 @@ def apply_class_config(
     return data_train, data_test, output_class_labels
 
 
-def train(model, out_dir, percent, ebops, data_dir, class_config):
+def train(model, out_dir, percent, ebops, data_dir, class_config, test_data_dirs=None):
 
-    # Load the data, class_labels and input variables name, not really using input variable names to be honest
     training_data_path = os.path.join(data_dir, "training_data")
-    testing_data_path = os.path.join(data_dir, "testing_data")
-    
+
     data_train, _, source_labels, input_vars, extra_vars = load_data(
-        training_data_path, percentage=percent
-    )
-    data_test, _, test_source_labels, test_input_vars, test_extra_vars = load_data(
-        testing_data_path, percentage=percent
+        training_data_path,
+        percentage=percent,
     )
     
-    if source_labels != test_source_labels:
-        raise ValueError("Training and testing class mappings differ")
+    # Preserve the existing default when no explicit test directories are given.
+    if test_data_dirs is None:
+        test_data_dirs = [os.path.join(data_dir, "testing_data")]
     
+    test_parts = []
+    
+    for directory in test_data_dirs:
+        part, _, labels, inputs, extras = load_data(
+            directory,
+            percentage=100,
+        )
+    
+        if labels != source_labels:
+            raise ValueError(
+                f"Training and testing class mappings differ: {directory}"
+            )
+        if inputs != input_vars or extras != extra_vars:
+            raise ValueError(
+                f"Training and testing variables differ: {directory}"
+            )
+    
+        test_parts.append(part)
+    
+    data_test = ak.concatenate(test_parts, axis=0)
+    del test_parts
+
     data_train, data_test, class_labels = apply_class_config(
         data_train,
         data_test,
@@ -331,8 +424,13 @@ def train(model, out_dir, percent, ebops, data_dir, class_config):
     X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(
         data_test, class_labels
     )
+    # Remove data_test from memory, to free up some RAM
+    del data_test
+    gc.collect()
     
     save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
+    del X_test, y_test, truth_pt_test, reco_pt_test
+    gc.collect()
 
     reco_mass_train = np.asarray(data_train["jet_mass_phys"])
     # Calculate the sample weights for training
@@ -347,7 +445,11 @@ def train(model, out_dir, percent, ebops, data_dir, class_config):
     if model.run_config['debug']:
         print("DEBUG - Checking sample_weight:")
         print(sample_weight)
-
+    
+    # Deleting variables that are no more needed to free up RAM
+    del data_train
+    del reco_mass_train, truth_pt_train, reco_pt_train
+    gc.collect()
     # Get input shape
     input_shape = X_train.shape[1:]  # First dimension is batch size
     output_shape = y_train.shape[1:]
@@ -399,6 +501,12 @@ if __name__ == "__main__":
         default=None,
         help="YAML configuration defining how source labels are grouped",
     )
+    parser.add_argument(
+        "--test-data-dirs",
+        nargs="+",
+        default=None,
+        help="Prepared evaluation dataset directories",
+    )
 
     args = parser.parse_args()
 
@@ -410,4 +518,4 @@ if __name__ == "__main__":
 
     else:
         model = fromYaml(args.yaml_config, args.output)
-        train(model, args.output, args.percent, args.ebops, args.data_dir, args.class_config)
+        train(model, args.output, args.percent, args.ebops, args.data_dir, args.class_config, args.test_data_dirs)

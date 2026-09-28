@@ -43,11 +43,17 @@ def _split_sc8_labels(data, label_branch, class_labels):
 
     labels = ak.to_list(data[label_branch][:, 0])
 
-    # Extend the SAME mapping across chunks; never renumber earlier labels.
-    for label in labels:
-        if label not in class_labels:
-            class_labels[label] = len(class_labels)
-
+    # Only keep jets from config file class
+    keep = np.asarray(
+        [label in class_labels for label in labels],
+        dtype=bool,
+    )
+    
+    data = data[keep]
+    labels = [
+        label for label, selected in zip(labels, keep) if selected
+    ]
+    
     data["class_label"] = np.asarray(
         [class_labels[label] for label in labels],
         dtype=np.int32,
@@ -413,7 +419,7 @@ def load_data(outdir, percentage, test_ratio=0.0, fields=None):
 
 
 def make_data(
-    infile=...,
+    infile,
     outdir="training_data/",
     tag=INPUT_TAG,
     extras=EXTRA_FIELDS,
@@ -422,38 +428,34 @@ def make_data(
     step_size="100MB",
     tree="outnano/Jets",
     num_workers=8,
-    append=False,
-    force=False,
     classes=None,
     label_branch=None,
-    test_split=0.2,
-    random_seed=42,
-    ):
-
+    pt_min=None,
+    pt_max=None,
+):
     source = _uproot_source(infile, tree)
-    if os.path.exists(outdir) and not append:
-        if force:
-            shutil.rmtree(outdir)
-        else:
-            confirm = input(f"The directory '{outdir}' already exists. Do you want to delete it and continue? [y/n]: ")
-            if confirm.lower() == 'y':
-                shutil.rmtree(outdir)
-                print(f"Deleted existing directory: {outdir}")
-            else:
-                print("Exiting without making changes.")
-                return
+    num_entries = sum(item[-1] for item in uproot.num_entries(source))
+
+    if num_entries == 0:
+        raise ValueError(f"No entries found in {infile}")
+
+    if os.path.exists(outdir):
+        answer = input(
+            f"The directory '{outdir}' already exists. "
+            "Delete it and continue? [y/n]: "
+        )
+        if answer.lower() != "y":
+            print("Exiting without making changes.")
+            return
+        shutil.rmtree(outdir)
 
     os.makedirs(outdir, exist_ok=True)
-    print("Output directory:", outdir)
+    with open(os.path.join(outdir, "metadata.json"), "w") as stream:
+        json.dump([], stream)
 
-    entry_info = uproot.num_entries(source)
-    num_entries = sum(
-        item[-1] if isinstance(item, tuple) else item
-        for item in entry_info
-    )
-    print("Input entries:", num_entries)
-    num_entries_done = 0
-    chunk = _next_chunk(outdir) if append else 0
+    class_labels = {
+        name: index for index, name in enumerate(classes or [])
+    }
 
     filters = [FILTER_PATTERN]
     if label_branch is not None:
@@ -467,61 +469,48 @@ def make_data(
         num_workers=num_workers,
     )
 
-    rng = np.random.default_rng(random_seed)
-    train_dir = os.path.join(outdir, "training_data")
-    test_dir = os.path.join(outdir, "testing_data")
-    for directory in (train_dir, test_dir):
-        os.makedirs(directory, exist_ok=True)
-        with open(os.path.join(directory, "metadata.json"), "w") as f:
-            json.dump([], f)
-    train_chunk = 0
-    test_chunk = 0
-    class_labels = {}
+    chunk = 0
+    entries_done = 0
+    print("Output directory:", outdir)
+    print("Input entries:", num_entries)
+
     with tqdm(total=num_entries, unit="jets") as pbar:
         for data in iterator:
-            pbar.set_description(f'Processing chunk {chunk}')
-            num_entries_done += len(data)
+            entries_done += len(data)
+            pbar.update(len(data))
+            pbar.set_description(f"Processing chunk {chunk}")
 
             jet_cut = (
-                (data['jet_pt_phys'] > 15)
-                & (np.abs(data['jet_eta_phys']) < 2.4)
-                & (data['jet_reject'] == 0)
+                (data["jet_pt_phys"] > 15)
+                & (np.abs(data["jet_eta_phys"]) < 2.4)
+                & (data["jet_reject"] == 0)
             )
-            
+
+            if pt_min is not None:
+                jet_cut = jet_cut & (data["jet_pt_phys"] >= pt_min)
+            if pt_max is not None:
+                jet_cut = jet_cut & (data["jet_pt_phys"] < pt_max)
+
             data = data[jet_cut]
 
-            if label_branch is None:
-                data_split, class_labels = _split_flavor(data)
-            else:
-                data_split, class_labels = _split_sc8_labels(
-                    data,
-                    label_branch,
-                    class_labels,
-                )
+            if len(data):
+                if label_branch is None:
+                    data_split, class_labels = _split_flavor(data)
+                else:
+                    data_split, class_labels = _split_sc8_labels(
+                        data, label_branch, class_labels
+                    )
 
-            is_test = rng.random(len(data_split)) < test_split
+                if len(data_split):
+                    _process_chunk(
+                        data_split, tag, extras, n_parts, chunk, outdir
+                    )
+                    chunk += 1
 
-            train_data = data_split[~is_test]
-            test_data = data_split[is_test]
-            
-            if len(train_data):
-                _process_chunk(
-                    train_data, tag, extras, n_parts, train_chunk, train_dir
-                )
-                train_chunk += 1
-            
-            if len(test_data):
-                _process_chunk(
-                    test_data, tag, extras, n_parts, test_chunk, test_dir
-                )
-                test_chunk += 1
-            
-            chunk += 1
-
-            if num_entries_done / num_entries >= ratio:
+            if entries_done / num_entries >= ratio:
                 break
-    _save_dataset_metadata(train_dir, class_labels, tag, extras)
-    _save_dataset_metadata(test_dir, class_labels, tag, extras)
+
+    _save_dataset_metadata(outdir, class_labels, tag, extras)
 
 def make_data_from_config(config_file, force=False):
     """Process every dataset folder from a YAML configuration."""

@@ -6,8 +6,8 @@ run_config :
 
 model_config :
   name : JEDILinear_HGQ2
-  conv1d_layers : [10,10]
-  classification_layers : [32,16]
+  conv1d_layers : [128,128, 256]
+  classification_layers : [256,64]
   regression_layers : [10]
   beta: 1.1e-7
 
@@ -15,9 +15,9 @@ quantization_config:
   pt_output_quantization : [16,6]
 
 training_config :
-  weight_method: "onlyclass"
-  epochs : 500
-  batch_size : 150000
+  weight_method: "massref"
+  epochs : 100
+  batch_size : 2054
   learning_rate : 0.003
   validation_split : 0.1
 

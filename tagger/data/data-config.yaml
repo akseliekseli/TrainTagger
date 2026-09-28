@@ -1,14 +1,11 @@
 jet_collection: sc8
 
+# Training inputs ONLY: XtoHH + QCD.
 input:
-  #- "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v1/*/FP/fp_jettuples_151X_SC4_SC8_v1/*.root"
-  # XtoHH
-  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2XtoHH_MX_140To780_PU200/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
-  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/XtoHH_MX_500To1000_PU200/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
-  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/XtoHH_MX_1000To4000_PU200/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
-  # QCD
+  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/XtoHH_*/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
   - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/QCD_*/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
-output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-v2/"
+
+output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/training_data"
 
 processing:
   step_size: "500MB"
@@ -17,11 +14,6 @@ processing:
   n_particles: 16
   input_tag: "baseline_hardware_inputs"
   extras: "extra_fields"
-
-append: false
-force: false
-test_split: 0.2
-random_seed: 42
 
 classes:
   - H_bb
@@ -34,4 +26,18 @@ classes:
   - QCD_c
   - QCD_others
 
-signal_processes: []
+signal_processes:
+  - name: XtoHH
+    input:
+      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/signal_holdout/XtoHH_MX_140To780_PU200/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
+    output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/XtoHH"
+
+    # Replace null with your requested jet_pt_phys limits, in GeV.
+    # Lower bound inclusive; upper bound exclusive.
+    pt_min: null
+    pt_max: null
+
+  - name: MinBias
+    input:
+      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/MinBias_PU200/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
+    output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/MinBias"

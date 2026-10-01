@@ -2,10 +2,10 @@ jet_collection: sc8
 
 # Training inputs ONLY: XtoHH + QCD.
 input:
-  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/XtoHH_*/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
-  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/QCD_*/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
+  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/XtoHH_*/FP/fp_jettuples_151X_SC4_SC8_v3/*.root"
+  - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/QCD_*/FP/fp_jettuples_151X_SC4_SC8_v3/.root"
 
-output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/training_data"
+output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-minbias/training_data"
 
 processing:
   step_size: "500MB"
@@ -29,8 +29,8 @@ classes:
 signal_processes:
   - name: XtoHH
     input:
-      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/signal_holdout/XtoHH_MX_140To780_PU200/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
-    output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/XtoHH"
+      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/signal_holdout/XtoHH_MX_140To780_PU200/FP/fp_jettuples_151X_SC4_SC8_v3/*.root"
+    output: "/eos/user/a/asuutari/FastPUPPI/XtoHH-qcd-minbias/signal_process_data/XtoHH"
 
     # Replace null with your requested jet_pt_phys limits, in GeV.
     # Lower bound inclusive; upper bound exclusive.
@@ -39,5 +39,5 @@ signal_processes:
 
   - name: MinBias
     input:
-      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v2/MinBias_PU200/FP/fp_jettuples_151X_SC4_SC8_v2/*.root"
-    output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/MinBias"
+      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/MinBias_PU200/FP/fp_jettuples_151X_SC4_SC8_v3/*.root"
+    output: "/eos/user/a/asuutari/FastPUPPI/XtoHH-qcd-minbias/signal_process_data/MinBias"

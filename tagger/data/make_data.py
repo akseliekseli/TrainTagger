@@ -1,9 +1,10 @@
 import os
 from argparse import ArgumentParser
+import json
 
 import yaml
 
-from tagger.data.tools import make_data
+from tagger.data.tools import make_data, make_signal_data
 
 
 COLLECTIONS = {
@@ -53,14 +54,32 @@ if __name__ == "__main__":
     # Separate samples for evaluation.
     for signal in config.get("signal_processes", []):
         if os.path.exists(signal["output"]):
-            print(
-                f"Signal output exists, skipping: {signal['output']}"
+            metadata_path = os.path.join(
+                signal["output"], "variables.json"
             )
+    
+            if not os.path.isfile(metadata_path):
+                raise RuntimeError(
+                    f"Incomplete output: {signal['output']}"
+                )
+    
+            with open(metadata_path) as stream:
+                metadata = json.load(stream)
+    
+            if not metadata.get("event_aware", False):
+                raise RuntimeError(
+                    f"Old-format output: {signal['output']}. "
+                    "Use a fresh output directory."
+                )
+    
+            print(f"Signal output exists, skipping: {signal['output']}")
             continue
-
-        make_data(
+    
+        make_signal_data(
             infile=signal["input"],
             outdir=signal["output"],
+            event_tree=signal.get("event_tree", "outnanoSC8/Events"),
+            events_per_chunk=signal.get("events_per_chunk", 1000),
             ratio=signal.get("ratio", 1.0),
             pt_min=signal.get("pt_min"),
             pt_max=signal.get("pt_max"),

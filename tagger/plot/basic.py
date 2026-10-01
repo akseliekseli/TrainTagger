@@ -20,6 +20,10 @@ from sklearn.metrics import auc, roc_curve
 
 from tagger.data.tools import load_data, to_ML
 from tagger.plot import style
+from tagger.plot.nprong.plot_data import load_plot_data
+from tagger.plot.nprong.plot_roc_bins import plot_ROC_bins
+from tagger.plot.nprong.plot_turn_on_curve_mass import plot_turn_on_curve_mass
+
 import hgq
 
 from .common import PT_BINS, plot_histo
@@ -258,6 +262,96 @@ def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
     plt.close()
 
     return ROC_dict
+
+
+def ROC_vs_background(y_pred, y_test, class_labels, plot_dir, ROC_dict, bkg_idx):
+    # Create a colormap for unique colors
+    # Use 'tab10' with enough colors
+    colormap = plt.get_cmap("Set1", len(class_labels))
+
+    print("y_test:", y_test.shape)
+    print("y_pred:", y_pred.shape)
+    
+    if len(y_test) != len(y_pred):
+        raise ValueError(
+            f"Prediction/label mismatch: {len(y_pred)=}, {len(y_test)=}"
+        )
+
+    # Create a plot for ROC curves
+    fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
+    hep.cms.label(llabel=style.CMSHEADER_LEFT, rlabel=style.CMSHEADER_RIGHT, ax=ax, fontsize=style.CMSHEADER_SIZE)
+    for class_label, i in sorted(
+        class_labels.items(), key=lambda item: item[1]
+    ):
+        background_idx = class_labels["QCD"]
+
+        signal_mask = y_test[:, i] == 1
+        background_mask = y_test[:, background_idx] == 1
+        mask = signal_mask | background_mask
+        
+        # Get true labels and predicted probabilities for the current class
+        # Extract the one-hot column for the current class
+        y_true = y_test[:, i]
+        y_score = (
+            y_pred[mask, i]
+            / (y_pred[mask, i] + y_pred[mask, background_idx] + 1e-12)
+        )
+        assert len(y_true) == len(y_score), (
+            f"{class_label}: {len(y_true)=}, {len(y_score)=}"
+        )
+
+
+        # Skip if missing classes
+        n_positive = int(np.sum(y_true))
+        n_negative = len(y_true) - n_positive
+        if n_positive == 0 or n_negative == 0:
+            print(
+                f"Skipping ROC for {class_label}: "
+                f"{n_positive} positive and {n_negative} negative jets"
+            )
+            continue
+
+        # Compute FPR, TPR, and AUC
+        fpr, tpr, _ = roc_curve(y_true, y_score)
+        idx = np.argmin(np.abs(tpr - 0.5))
+        roc_auc = auc(fpr, tpr)
+        
+        print(f"FPR at TPR for {class_label} ≈ 0.5 (actual TPR = {tpr[idx]:.4f}): {fpr[idx]:.4f}, AUC: {roc_auc:.4f}")
+
+        ROC_dict[class_label] = roc_auc
+        # Plot the ROC curve for the current class
+        ax.plot(
+            tpr,
+            fpr,
+            label=f'{style.CLASS_LABEL_STYLE[class_label]} (AUC = {roc_auc:.2f})',
+            color=colormap(i),
+            linewidth=style.LINEWIDTH,
+        )
+
+    # Plot formatting
+    ax.grid(True)
+    ax.set_ylabel('Mistag Rate')
+    ax.set_xlabel('Signal Efficiency')
+
+    auc_list = [value for key, value in ROC_dict.items()]
+    handles, labels = plt.gca().get_legend_handles_labels()
+    order = np.argsort(auc_list)
+    ax.legend(
+        [handles[idx] for idx in order],
+        [labels[idx] for idx in order],
+        loc='upper left',
+        ncol=2,
+        fontsize=style.SMALL_SIZE - 3,
+    )
+
+    ax.set_yscale('log')
+    ax.set_ylim([1e-3, 1.1])
+
+    # Save the plot
+    save_path = os.path.join(plot_dir, "basic_ROC_vs_bkg")
+    plt.savefig(f"{save_path}.pdf", bbox_inches='tight')
+    plt.savefig(f"{save_path}.png", bbox_inches='tight')
+    plt.close()
 
 
 def confusion(y_pred, y_test, class_labels, plot_dir):
@@ -960,11 +1054,46 @@ def basic(model, signal_dirs):
     Plot the basic ROCs for different classes. Does not reflect L1 rate
     Returns a dictionary of ROCs for each class
     """
-
+    import time
     plot_dir = os.path.join(model.output_directory, "plots/training")
 
     # ROC_dict = {class_label: 0 for class_label in model.class_labels}
     ROC_dict = {}
+    start = time.time()
+    plot_data = load_plot_data(
+        model,
+        signal_dir=(
+            "/eos/user/a/asuutari/FastPUPPI/"
+            "XtoHH-qcd-minbias/signal_process_data/XtoHH"
+        ),
+        background_dir=(
+            "/eos/user/a/asuutari/FastPUPPI/"
+            "XtoHH-qcd-minbias/signal_process_data/MinBias"
+        ),
+        max_chunks=10,  # None for the full dataset; applies to BOTH plots.
+        batch_size=4096,
+    )
+    print(f"RUNTIME: load_plot_data {time.time()-start:.3f} s")
+
+    start = time.time()
+    plot_ROC_bins(
+        plot_data,
+        background_classes=("QCD_bb", "QCD_b", "QCD_cc", "QCD_c", "QCD_others"),
+        mass_targets=(30, 50, 90),
+        mass_window=2.0,
+    )
+    print(f"RUNTIME: plot_ROC_bins {time.time()-start:.3f} s")
+
+    start = time.time()
+    plot_turn_on_curve_mass(
+        plot_data,
+        mass_centers=(20, 30, 40, 50, 60, 70, 80, 90),
+        mass_window=2.0,
+        score_cuts=(0.0, 0.85, 0.95, 0.96),
+        target_rate_hz=50000,
+    )
+    print(f"RUNTIME: plot_turn_on_curve_mass {time.time()-start:.3f} s")
+    del plot_data
 
     # Load the testing data
     X_test = np.load(f"{model.output_directory}/testing_data/X_test.npy")
@@ -979,6 +1108,7 @@ def basic(model, signal_dirs):
     y_pred, pt_ratio = model_outputs[0], model_outputs[1]
      # Plot ROC curves
     ROC_dict = ROC(y_pred, y_test, model.class_labels, plot_dir, ROC_dict)
+    ROC_vs_background(y_pred, y_test, model.class_labels, plot_dir, ROC_dict, model.class_labels["QCD"])
     class_pairs = []
     # Generate all possible pairs of classes
     for i in model.class_labels.keys():
@@ -991,6 +1121,7 @@ def basic(model, signal_dirs):
 
     y_p, y_t = y_pred, y_test
     process_label = None
+
 
     # Plot the binary ROCs for each class pair
     for class_pair in class_pairs:
@@ -1086,3 +1217,4 @@ def basic(model, signal_dirs):
     plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
 
     return ROC_dict
+

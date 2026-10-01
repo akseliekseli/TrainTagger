@@ -393,6 +393,9 @@ def train(model, out_dir, percent, ebops, data_dir, class_config, test_data_dirs
             percentage=100,
         )
     
+        print("Training source labels:", source_labels, flush=True)
+        print("Testing source labels:", labels, flush=True)
+
         if labels != source_labels:
             raise ValueError(
                 f"Training and testing class mappings differ: {directory}"

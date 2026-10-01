@@ -20,6 +20,192 @@ gc.set_threshold(0)
 
 # >>>>>>>>>>>>>>>>>>>PRIVATE FUNCTIONS<<<<<<<<<<<<<<<<<<<<<<
 
+def make_signal_data(
+    infile,
+    outdir,
+    tag=INPUT_TAG,
+    extras=EXTRA_FIELDS,
+    n_parts=N_PARTICLES,
+    ratio=1.0,
+    step_size="100MB",
+    tree="outnanoSC8/Jets",
+    num_workers=8,
+    classes=None,
+    label_branch="sc8_label",
+    pt_min=None,
+    pt_max=None,
+    event_tree="outnanoSC8/Events",
+    events_per_chunk=1000,
+):
+    if ratio != 1.0 or events_per_chunk < 1:
+        raise ValueError(
+            "Use ratio=1.0 and events_per_chunk >= 1"
+        )
+    if (
+        not classes
+        or len(set(classes)) != len(classes)
+        or not label_branch
+    ):
+        raise ValueError("Specify SC8 label_branch and unique classes")
+
+    files = sorted(set(
+        item[0]
+        for item in uproot.num_entries(_uproot_source(infile, tree))
+    ))
+    if not files:
+        raise ValueError("No input files found")
+
+    identifiers = ["run", "lumi", "event"]
+
+    def event_keys(obj):
+        missing = set(identifiers) - set(obj.keys())
+        if missing:
+            raise ValueError(
+                f"Missing event identifiers: {sorted(missing)}"
+            )
+
+        arrays = obj.arrays(identifiers, library="ak")
+        return np.rec.fromarrays(
+            [
+                ak.to_numpy(arrays[name]).astype(np.uint64)
+                for name in identifiers
+            ],
+            names=",".join(identifiers),
+        )
+
+    os.makedirs(outdir, exist_ok=False)
+    with open(os.path.join(outdir, "metadata.json"), "w") as stream:
+        json.dump([], stream)
+
+    labels = {name: i for i, name in enumerate(classes)}
+    filters = [FILTER_PATTERN, label_branch] + identifiers
+    stored = identifiers + [
+        "source_id", "jet_reject",
+    ]
+    chunk = 0
+
+    for source_id, filename in enumerate(files):
+        print(f"Processing complete events: {filename}", flush=True)
+
+        # File reader for your mounted /eos/... paths.
+        with uproot.open(
+            filename,
+            handler=uproot.source.file.MultithreadedFileSource,
+            num_workers=num_workers,
+        ) as root_file:
+            jets = root_file[tree]
+            event_records = root_file[event_tree]
+
+            ek = event_keys(event_records)
+            jk = event_keys(jets)
+
+            if len(np.unique(ek)) != len(ek):
+                raise ValueError(
+                    f"Duplicate event identifiers in {filename}"
+                )
+
+            # Map each jet to its corresponding Events entry.
+            order = np.argsort(ek)
+            positions = np.searchsorted(ek[order], jk)
+
+            if np.any(positions >= len(ek)):
+                raise ValueError(
+                    f"Jets without matching Events entries: {filename}"
+                )
+            if np.any(ek[order][positions] != jk):
+                raise ValueError(
+                    f"Jets without matching Events entries: {filename}"
+                )
+
+            jet_event = order[positions]
+
+            if np.any(jet_event[1:] < jet_event[:-1]):
+                raise ValueError(
+                    f"Jets are not ordered like Events in {filename}"
+                )
+
+            for start in range(0, len(ek), events_per_chunk):
+                stop = min(start + events_per_chunk, len(ek))
+
+                # All jets belonging to this complete batch of events.
+                first, last = np.searchsorted(
+                    jet_event, [start, stop]
+                )
+
+                events = event_records.arrays(
+                    entry_start=start,
+                    entry_stop=stop,
+                    library="ak",
+                    how=dict,
+                )
+                data = jets.arrays(
+                    entry_start=int(first),
+                    entry_stop=int(last),
+                    filter_name=filters,
+                    library="ak",
+                    how="zip",
+                )
+
+                data, _ = _split_sc8_labels(
+                    data, label_branch, labels, drop_unknown=False
+                )
+                # Exactly the original reconstructed-jet cuts.
+                jet_cut = (
+                    (data["jet_pt_phys"] > 15)
+                    & (np.abs(data["jet_eta_phys"]) < 2.4)
+                    & (data["jet_reject"] == 0)
+                )
+                
+                if pt_min is not None:
+                    jet_cut = jet_cut & (data["jet_pt_phys"] >= pt_min)
+                
+                if pt_max is not None:
+                    jet_cut = jet_cut & (data["jet_pt_phys"] < pt_max)
+                
+                data = data[jet_cut]
+                
+                # Exactly the original class selection: discard unconfigured labels.
+                data, _ = _split_sc8_labels(
+                    data,
+                    label_branch,
+                    labels,
+                    drop_unknown=True,
+                )
+                
+                # Compact the selected jet buffers before writing.
+                data = ak.to_packed(data)
+                
+                data["source_id"] = np.full(
+                    len(data), source_id, dtype=np.int64
+                )
+                
+                # Keep ALL event records in this batch, including events whose
+                # jets were all removed. These records are for physics analysis only.
+                events["source_id"] = np.full(
+                    stop - start, source_id, dtype=np.int64
+                )
+
+                _process_chunk(
+                    data, tag, extras, n_parts, chunk, outdir,
+                    additional_fields=stored,
+                    events=events,
+                )
+                chunk += 1
+
+    _save_dataset_metadata(outdir, labels, tag, extras)
+
+    path = os.path.join(outdir, "variables.json")
+    with open(path) as stream:
+        variables = json.load(stream)
+
+    variables.update(
+        event_aware=True,
+        source_files=files,
+    )
+
+    with open(path, "w") as stream:
+        json.dump(variables, stream, indent=2)
+
 
 def _add_response_vars(data):
     data['jet_ptUncorr_div_ptGen'] = ak.nan_to_num(
@@ -32,32 +218,29 @@ def _add_response_vars(data):
         data['jet_pt_raw'] / data['jet_genmatch_pt'], copy=True, nan=0.0, posinf=0.0, neginf=0.0
     )
 
-def _split_sc8_labels(data, label_branch, class_labels):
-    # Expect one label per jet in the corrected ntuples.
+def _split_sc8_labels(
+    data, label_branch, class_labels, drop_unknown=True
+):
+    # One label per jet, stored as a singleton vector.
     counts = ak.num(data[label_branch], axis=1)
     if not bool(ak.all(counts == 1)):
         raise ValueError(
-            f"Expected exactly one label per jet in {label_branch}. "
-            "Found empty or multiple-label entries."
+            f"Expected exactly one label per jet in {label_branch}"
         )
 
     labels = ak.to_list(data[label_branch][:, 0])
 
-    # Only keep jets from config file class
-    keep = np.asarray(
-        [label in class_labels for label in labels],
-        dtype=bool,
-    )
-    
-    data = data[keep]
-    labels = [
-        label for label, selected in zip(labels, keep) if selected
-    ]
-    
-    data["class_label"] = np.asarray(
-        [class_labels[label] for label in labels],
+    indices = np.asarray(
+        [class_labels.get(label, -1) for label in labels],
         dtype=np.int32,
     )
+
+    if drop_unknown:
+        keep = indices >= 0
+        data = data[keep]
+        indices = indices[keep]
+
+    data["class_label"] = indices
 
     truth_pt = ak.nan_to_num(
         data["jet_genmatch_pt"],
@@ -65,9 +248,8 @@ def _split_sc8_labels(data, label_branch, class_labels):
         posinf=0,
         neginf=0,
     )
-    
     data["target_pt_phys"] = truth_pt
-    
+
     data["target_pt"] = np.clip(
         ak.nan_to_num(
             truth_pt / data["jet_pt_phys"],
@@ -78,6 +260,7 @@ def _split_sc8_labels(data, label_branch, class_labels):
         0.3,
         2,
     )
+
     return data, class_labels
 
 def _split_flavor(data):
@@ -237,22 +420,44 @@ def _save_dataset_metadata(outdir, class_labels, tag, extras):
         json.dump(metadata, f, indent=4)
 
 
-def _process_chunk(data_split, tag, extras, n_parts, chunk, outdir):
-    """Process and save one chunk of data."""
-    if len(data_split) == 0:
+def _process_chunk(
+    data_split, tag, extras, n_parts, chunk, outdir,
+    additional_fields=(), events=None,
+):
+    """Save jet data and its corresponding events in the same ROOT file."""
+    if len(data_split) == 0 and events is None:
         return
 
     _make_nn_inputs(data_split, tag, n_parts)
-    extra_features = _get_puppicand_fields(extras)
-    save_fields = ['nn_inputs', 'class_label', 'target_pt', 'target_pt_phys'] + extra_features
-    filtered_data = {field: data_split[field] for field in save_fields}
 
-    outfile = os.path.abspath(os.path.join(outdir, f'data_chunk_{chunk}.root'))
+    extra_features = _get_puppicand_fields(extras)
+    save_fields = [
+        "nn_inputs",
+        "class_label",
+        "target_pt",
+        "target_pt_phys",
+    ] + extra_features + list(additional_fields)
+
+    filtered_data = {
+        field: data_split[field]
+        for field in save_fields
+    }
+
+    outfile = os.path.abspath(
+        os.path.join(outdir, f"data_chunk_{chunk}.root")
+    )
+
     with uproot.recreate(outfile) as f:
         f["data"] = filtered_data
 
+        if events is not None:
+            f["events"] = events
+
     metadata_file = os.path.join(outdir, "metadata.json")
-    _save_chunk_metadata(metadata_file, chunk, len(data_split), outfile)
+    _save_chunk_metadata(
+        metadata_file, chunk, len(data_split), outfile
+    )
+
     del data_split, filtered_data, outfile
     gc.collect()
 

@@ -1,0 +1,11 @@
+
+classes:
+  2-prong:
+    - H_bb
+    - H_cc
+    - H_qq
+    - H_gg
+  1-prong:
+    - QCD_b
+    - QCD_c
+    - QCD_others

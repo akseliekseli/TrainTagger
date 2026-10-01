@@ -60,6 +60,8 @@ CLASS_LABEL_STYLE = {
     "QCD_c": "QCD c",
     "QCD_others": "QCD others",
     "QCD": "QCD",
+    "2-prong": "2-prong",
+    "1-prong": "1-prong",
 
     "inclusive": "Inclusive",
     "Regression": "Regression",

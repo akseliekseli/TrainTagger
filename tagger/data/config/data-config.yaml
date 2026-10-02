@@ -1,0 +1,52 @@
+jet_collection: sc8
+
+signal_labels: &signal_labels
+  - H_bb
+  - H_cc
+  - H_qq
+  - H_gg
+
+background_labels: &background_labels
+  - QCD_bb
+  - QCD_cc
+  - QCD_b
+  - QCD_c
+  - QCD_others
+
+# Training inputs ONLY: XtoHH + QCD.
+input:
+  - input: "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/XtoHH_*/FP/fp_jettuples_151X_SC4_SC8_v3/*.root"
+    keep_labels: *signal_labels
+  - input: "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/QCD_*/FP/fp_jettuples_151X_SC4_SC8_v3/*.root"
+    keep_labels: *background_labels
+
+# Fresh output: existing chunks are not modified by changing this configuration.
+output: "/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-minbias-label-selected/training_data"
+
+processing:
+  step_size: "500MB"
+  ratio: 1.0
+  num_workers: 8
+  n_particles: 16
+  input_tag: "baseline_hardware_inputs"
+  extras: "extra_fields"
+
+
+signal_processes:
+  - name: XtoHH
+    input:
+      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/signal_holdout/XtoHH_MX_140To780_PU200/FP/fp_jettuples_151X_SC4_SC8_v3/*.root"
+    output: "/eos/user/a/asuutari/FastPUPPI/XtoHH-qcd-minbias-label-selected/signal_process_data/XtoHH"
+    keep_labels: *signal_labels
+
+    # Replace null with your requested jet_pt_phys limits, in GeV.
+    # Lower bound inclusive; upper bound exclusive.
+    pt_min: null
+    pt_max: null
+
+  - name: MinBias
+    input:
+      - "/eos/home-a/asuutari/FastPUPPI/17_0_X/fp_jettuples_151X_SC4_SC8_v3/MinBias_PU200/FP/fp_jettuples_151X_SC4_SC8_v3/*.root"
+    output: "/eos/user/a/asuutari/FastPUPPI/XtoHH-qcd-minbias-label-selected/signal_process_data/MinBias"
+    keep_labels: *background_labels
+

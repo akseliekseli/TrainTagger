@@ -3,11 +3,16 @@ set -euo pipefail
 
 REPOSITORY="/eos/home-a/asuutari/projects/TrainTagger"
 PYTHON="/eos/home-a/asuutari/conda-envs/tagger/bin/python"
-DATA_DIR="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation"
-CLASS_CONFIG="${REPOSITORY}/tagger/train/sc8_classes.yaml"
+DATA_DIR="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-minbias-label-selected"
 
+MODEL_NAME="test_stream"
+MODEL_CONFIG="MLPmixer_HGQ2.yaml"
+CLASSES="sc8_classes.yaml"
 PERCENT=100
-MODEL_DIR="/eos/home-a/asuutari/projects/TrainTagger/output/sc8_jedilinear_larger"
+EBOPS=300000
+
+MODEL_DIR="/eos/home-a/asuutari/projects/TrainTagger/output/${MODEL_NAME}"
+CLASS_CONFIG="${REPOSITORY}/tagger/train/configs/${CLASSES}"
 
 cd "${REPOSITORY}"
 
@@ -23,28 +28,19 @@ echo "CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-not-set}"
 echo "Model directory: ${MODEL_DIR}"
 echo "Dataset percentage: ${PERCENT}"
 
-nvidia-smi
-
-"${PYTHON}" - <<'PY'
-import tensorflow as tf
-
-gpus = tf.config.list_physical_devices("GPU")
-print("TensorFlow GPUs:", gpus)
-
-if not gpus:
-    raise RuntimeError("No GPU is visible to TensorFlow")
-PY
-
 "${PYTHON}" -u -m tagger.train.train \
-    --yaml_config tagger/model/configs/JEDIlinear_HGQ2.yaml \
+    --yaml_config tagger/model/configs/"${MODEL_CONFIG}" \
     --data-dir "${DATA_DIR}" \
     --test-data-dirs \
-    /eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/XtoHH \
-    /eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-evaluation/signal_process_data/MinBias \
+    /eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-minbias/signal_process_data/XtoHH \
+    /eos/home-a/asuutari/FastPUPPI/XtoHH-qcd-minbias/signal_process_data/MinBias \
     --class-config "${CLASS_CONFIG}" \
     --output "${MODEL_DIR}" \
     --percent "${PERCENT}" \
-    --ebops 300000
+    --ebops "${EBOPS}" \
+    --stream-read-entries 8192 \
+    --stream-shuffle-jets 10000 \
+    --stream-prefetch 1
 
 echo "Starting plotting"
 

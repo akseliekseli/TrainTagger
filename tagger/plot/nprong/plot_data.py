@@ -13,7 +13,6 @@ GEN_FIELDS = (
     "GenPart_eta", "GenPart_phi", "GenPart_mass", "GenPart_pdgId",
     "GenJetAK8_eta", "GenJetAK8_phi",
 )
-SCORE_CLASSES = ("H_bb", "H_cc", "H_qq", "H_gg")
 
 
 def _read(tree, fields):
@@ -110,7 +109,7 @@ def _predict(model, inputs, columns, batch_size):
     return scores, tagger
 
 
-def _load_sample(model, directory, *, signal, columns, batch_size, max_chunks):
+def _load_sample(model, directory, *, signal, score_classes, columns, batch_size, max_chunks):
     directory = Path(directory)
     with (directory / "variables.json").open() as stream:
         variables = json.load(stream)
@@ -126,8 +125,8 @@ def _load_sample(model, directory, *, signal, columns, batch_size, max_chunks):
     ids = list(source_labels.values())
     if any(type(index) is not int or index < 0 for index in ids) or len(set(ids)) != len(ids):
         raise ValueError("Dataset outputs must map names to unique nonnegative integer IDs")
-    if signal and set(SCORE_CLASSES) - set(source_labels):
-        raise ValueError(f"Signal labels must include {SCORE_CLASSES}")
+    if signal and set(score_classes) - set(source_labels):
+        raise ValueError(f"Signal labels must include {score_classes}")
 
     parts = {name: [] for name in ("pt", "scores", "tagger", "class_label", "event_index")}
     if signal:
@@ -192,25 +191,31 @@ def _load_sample(model, directory, *, signal, columns, batch_size, max_chunks):
     return sample
 
 
-def load_plot_data(model, signal_dir, background_dir, *, batch_size=4096, max_chunks=None):
+def load_plot_data(model, signal_dir, background_dir, *, score_classes,
+                   batch_size=4096, max_chunks=None):
     """Return reusable NumPy plot data; no open ROOT files or constituent arrays.
 
     Memory scales with compact per-jet arrays, not the full ROOT contents.
     max_chunks selects the first N metadata entries separately for each sample.
+    scores columns follow score_classes; tagger is their unnormalised sum.
     """
-    if max_chunks is not None and (type(max_chunks) is not int or max_chunks < 1):
-        raise ValueError("max_chunks must be a positive integer or None")
-    if type(batch_size) is not int or batch_size < 1:
-        raise ValueError("batch_size must be a positive integer")
-    if set(SCORE_CLASSES) - set(model.class_labels):
-        raise ValueError(f"Model needs separate outputs for {SCORE_CLASSES}")
+    if not isinstance(score_classes, (list, tuple)) or not score_classes:
+        raise ValueError("score_classes must be a nonempty list or tuple of names")
+    score_classes = tuple(score_classes)
+    if any(not isinstance(name, str) for name in score_classes):
+        raise ValueError("score_classes must contain class names")
+    if len(set(score_classes)) != len(score_classes):
+        raise ValueError("score_classes must not contain duplicates")
+    missing = set(score_classes) - set(model.class_labels)
+    if missing:
+        raise ValueError(f"Model has no outputs for: {sorted(missing)}")
     if sorted(model.class_labels.values()) != list(range(len(model.class_labels))):
         raise ValueError("Model class indices must be contiguous from zero")
-    columns = [model.class_labels[name] for name in SCORE_CLASSES]
-    data = {"score_classes": SCORE_CLASSES, "max_chunks": max_chunks,
+    columns = [model.class_labels[name] for name in score_classes]
+    data = {"score_classes": score_classes, "max_chunks": max_chunks,
             "output_directory": str(model.output_directory)}
     for name, directory in (("background", background_dir), ("signal", signal_dir)):
         data[name] = _load_sample(model, directory, signal=name == "signal", columns=columns,
-                                  batch_size=batch_size, max_chunks=max_chunks)
+                                  score_classes=score_classes, batch_size=batch_size, max_chunks=max_chunks)
     return data
 

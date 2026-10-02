@@ -2,6 +2,9 @@ import gc
 import os
 from argparse import ArgumentParser
 
+# Set the backend BEFORE importing model modules/Keras.
+os.environ.setdefault("KERAS_BACKEND", "tensorflow")
+
 # Third parties
 import numpy as np
 import awkward as ak
@@ -12,7 +15,9 @@ from tagger.data.tools import load_data, to_ML
 from tagger.model.common import fromFolder, fromYaml
 from tagger.plot.basic import basic
 
-os.environ["KERAS_BACKEND"] = "torch"
+from tagger.train.streaming_data import (
+    RootTrainingData, check_test_samples, save_test_data_streaming,
+)
 
 def save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test):
 
@@ -372,104 +377,92 @@ def apply_class_config(
     return data_train, data_test, output_class_labels
 
 
-def train(model, out_dir, percent, ebops, data_dir, class_config, test_data_dirs=None):
+def train(
+    model, out_dir, percent, ebops, data_dir, class_config, test_data_dirs=None,
+    stream_read_entries=32768, stream_shuffle_jets=50000,
+    stream_prefetch=1, stream_seed=42,
+):
+    import json
+    import keras
 
-    training_data_path = os.path.join(data_dir, "training_data")
+    if keras.backend.backend() != "tensorflow":
+        raise ValueError("This streaming HGQ2 path requires KERAS_BACKEND=tensorflow")
 
-    data_train, _, source_labels, input_vars, extra_vars = load_data(
-        training_data_path,
-        percentage=percent,
+    training = RootTrainingData(
+        os.path.join(data_dir, "training_data"),
+        class_config, percent, model.training_config["weight_method"],
+        read_entries=stream_read_entries,
     )
-    
-    # Preserve the existing default when no explicit test directories are given.
     if test_data_dirs is None:
         test_data_dirs = [os.path.join(data_dir, "testing_data")]
-    
-    test_parts = []
-    
-    for directory in test_data_dirs:
-        part, _, labels, inputs, extras = load_data(
-            directory,
-            percentage=100,
-        )
-    
-        print("Training source labels:", source_labels, flush=True)
-        print("Testing source labels:", labels, flush=True)
+    test_samples = check_test_samples(test_data_dirs, training)
 
-        if labels != source_labels:
-            raise ValueError(
-                f"Training and testing class mappings differ: {directory}"
-            )
-        if inputs != input_vars or extras != extra_vars:
-            raise ValueError(
-                f"Training and testing variables differ: {directory}"
-            )
-    
-        test_parts.append(part)
-    
-    data_test = ak.concatenate(test_parts, axis=0)
-    del test_parts
+    validation_split = model.training_config["validation_split"]
+    if not 0 < validation_split < 1:
+        raise ValueError("validation_split must lie between 0 and 1")
+    # Match Keras's existing array split: the final fraction BEFORE shuffling.
+    split_at = int(training.n_samples * (1 - validation_split))
+    if not 0 < split_at < training.n_samples:
+        raise ValueError("Not enough selected jets for training and validation")
 
-    data_train, data_test, class_labels = apply_class_config(
-        data_train,
-        data_test,
-        source_labels,
-        class_config,
+    print("Model output classes:", training.class_labels, flush=True)
+    print(f"Fit jets: {split_at}; validation jets: {training.n_samples-split_at}", flush=True)
+    model.set_labels(
+        training.variables["inputs"], training.variables["extras"], training.class_labels,
     )
-    
-    print("Model output classes:", class_labels)
-    
-    model.set_labels(input_vars, extra_vars, class_labels)
-    
-    X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train = to_ML(
-        data_train, class_labels
-    )
-    X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(
-        data_test, class_labels
-    )
-    # Remove data_test from memory, to free up some RAM
-    del data_test
-    gc.collect()
-    
-    save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
-    del X_test, y_test, truth_pt_test, reco_pt_test
-    gc.collect()
+    model.build_model(training.input_shape, (len(training.class_labels),))
+    model.compile_model(split_at, ebops)
 
-    reco_mass_train = np.asarray(data_train["jet_mass_phys"])
-    # Calculate the sample weights for training
-    sample_weight = train_weights(
-        y_train,
-        reco_pt_train,
-        class_labels,
-        weightingMethod=model.training_config['weight_method'],
-        debug=model.run_config['debug'],
-        reco_mass_train=reco_mass_train,
+    batch_size = model.training_config["batch_size"]
+    train_dataset = training.dataset(
+        0, split_at, batch_size, shuffle_jets=stream_shuffle_jets,
+        seed=stream_seed, prefetch=stream_prefetch,
     )
-    if model.run_config['debug']:
-        print("DEBUG - Checking sample_weight:")
-        print(sample_weight)
-    
-    # Deleting variables that are no more needed to free up RAM
-    del data_train
-    del reco_mass_train, truth_pt_train, reco_pt_train
-    gc.collect()
-    # Get input shape
-    input_shape = X_train.shape[1:]  # First dimension is batch size
-    output_shape = y_train.shape[1:]
-    
-    print("Total jets for training: ", X_train.shape[0:] )
+    validation_dataset = training.dataset(
+        split_at, training.n_samples, batch_size, prefetch=stream_prefetch,
+    )
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "streaming_training.json"), "w") as stream:
+        json.dump({
+            "class_labels": training.class_labels,
+            "class_groups": training.groups,
+            "selected_jets": training.n_samples,
+            "fit_jets": split_at,
+            "validation_jets": training.n_samples-split_at,
+            "validation_selection": "last fraction of selected rows, before shuffle",
+            "weight_statistics": "full selected training directory, including validation (unchanged)",
+            "weight_method": training.weights.method,
+            "weight_fields": training.weights.fields,
+            "weight_bin_edges": [
+                [float(value) if np.isfinite(value) else "inf" for value in edges]
+                for edges in training.weights.edges
+            ],
+            "weight_table": None if training.weights.table is None else training.weights.table.tolist(),
+            "read_entries": stream_read_entries,
+            "shuffle_jets": stream_shuffle_jets,
+            "prefetch_batches": stream_prefetch,
+            "seed": stream_seed,
+            "training_files": training.sample["files"],
+            "test_directories": [str(path) for path in test_data_dirs],
+        }, stream, indent=2)
 
-    model.build_model(input_shape, output_shape)
-    # Train it with a pruned model
-    num_samples = X_train.shape[0] * (1 - model.training_config['validation_split'])
-    model.compile_model(num_samples, ebops)
-    model.fit(X_train, y_train, pt_target_train, sample_weight)
-
+    # Keep one fit call and the callbacks created by compile_model().
+    # The wrapper's array-only fit() cannot accept a streamed validation set.
+    history = model.jet_model.fit(
+        train_dataset,
+        validation_data=validation_dataset,
+        epochs=model.training_config["epochs"],
+        verbose=model.run_config["verbose"],
+        callbacks=model.callbacks,
+    )
+    model.history = history.history
     model.save()
+    del train_dataset, validation_dataset
+    gc.collect()
 
+    # Held-out samples never enter fit() or its validation dataset.
+    save_test_data_streaming(out_dir, test_samples, training)
     model.plot_loss()
-
-    return
 
 
 if __name__ == "__main__":
@@ -511,6 +504,14 @@ if __name__ == "__main__":
         help="Prepared evaluation dataset directories",
     )
 
+    parser.add_argument("--stream-read-entries", type=int, default=32768,
+                        help="Maximum requested rows per ROOT read block")
+    parser.add_argument("--stream-shuffle-jets", type=int, default=50000,
+                        help="Bounded training shuffle buffer; 0 disables shuffling")
+    parser.add_argument("--stream-prefetch", type=int, default=1,
+                        help="Number of batches to prefetch; 0 disables prefetch")
+    parser.add_argument("--stream-seed", type=int, default=42)
+
     args = parser.parse_args()
 
 
@@ -521,4 +522,12 @@ if __name__ == "__main__":
 
     else:
         model = fromYaml(args.yaml_config, args.output)
-        train(model, args.output, args.percent, args.ebops, args.data_dir, args.class_config, args.test_data_dirs)
+        train(
+            model, args.output, args.percent, args.ebops, args.data_dir,
+            args.class_config, args.test_data_dirs,
+            stream_read_entries=args.stream_read_entries,
+            stream_shuffle_jets=args.stream_shuffle_jets,
+            stream_prefetch=args.stream_prefetch,
+            stream_seed=args.stream_seed,
+        )
+

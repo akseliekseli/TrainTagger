@@ -6,8 +6,6 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import beta
 
-from .plot_data import SCORE_CLASSES
-
 
 def _leading_indices(sample, selection=None):
     """First highest-pT selected jet per event, before applying any score cut."""
@@ -64,10 +62,9 @@ def plot_turn_on_curve_mass(plot_data, *,
                             mass_window=2.0, score_cuts=(0.0, 0.85, 0.95, 0.96),
                             target_rate_hz=50000, n_bunches=2760,
                             revolution_frequency_hz=11246, output_dir=None):
-    """No ROOT reads or inference. Score is the sum of the four Higgs outputs."""
+    """No ROOT reads or inference. Score sums the outputs selected at loading."""
     mass_centers, score_cuts = tuple(mass_centers), tuple(score_cuts)
-    if tuple(plot_data["score_classes"]) != SCORE_CLASSES:
-        raise ValueError("Unexpected score columns")
+    score_classes = tuple(plot_data["score_classes"])
     if not mass_centers or len(set(mass_centers)) != len(mass_centers):
         raise ValueError("Specify unique mass centers")
     if any(not np.isfinite(m) or m < 0 for m in mass_centers) or not np.isfinite(mass_window) or mass_window <= 0:
@@ -79,7 +76,7 @@ def plot_turn_on_curve_mass(plot_data, *,
         raise ValueError("Invalid rate normalization or target rate")
 
     signal, background = plot_data["signal"], plot_data["background"]
-    print("Turn-on score: " + " + ".join(SCORE_CLASSES), flush=True)
+    print("Turn-on score: " + " + ".join(score_classes), flush=True)
     print("Signal: leading matched jet per mass window, all decay labels. "
           "MinBias: leading jet, all saved events including zero jets.", flush=True)
 
@@ -118,7 +115,7 @@ def plot_turn_on_curve_mass(plot_data, *,
     intervals = [[_interval(int(k), int(n)) for k, n in zip(row, denominator)] for row in numerator]
     result = {
         "signal_dir": signal["directory"], "background_dir": background["directory"],
-        "score_classes": SCORE_CLASSES, "mass_centers": mass_centers, "mass_window": mass_window,
+        "score_classes": score_classes, "mass_centers": mass_centers, "mass_window": mass_window,
         "target_rate_hz": target_rate_hz, "total_mb_rate_hz": total_rate,
         "signal_events_read": signal["n_events"], "signal_denominator": denominator.tolist(),
         "signal_pass": numerator.tolist(), "working_points": working_points,

@@ -36,6 +36,7 @@ def make_signal_data(
     pt_max=None,
     event_tree="outnanoSC8/Events",
     events_per_chunk=1000,
+    keep_labels=None,
 ):
     if ratio != 1.0 or events_per_chunk < 1:
         raise ValueError(
@@ -47,6 +48,9 @@ def make_signal_data(
         or not label_branch
     ):
         raise ValueError("Specify SC8 label_branch and unique classes")
+
+    labels = {name: i for i, name in enumerate(classes)}
+    keep_indices = _keep_label_indices(keep_labels, labels)
 
     files = sorted(set(
         item[0]
@@ -77,7 +81,6 @@ def make_signal_data(
     with open(os.path.join(outdir, "metadata.json"), "w") as stream:
         json.dump([], stream)
 
-    labels = {name: i for i, name in enumerate(classes)}
     filters = [FILTER_PATTERN, label_branch] + identifiers
     stored = identifiers + [
         "source_id", "jet_reject",
@@ -171,6 +174,8 @@ def make_signal_data(
                     labels,
                     drop_unknown=True,
                 )
+                if keep_indices is not None:
+                    data = data[np.isin(ak.to_numpy(data["class_label"]), keep_indices)]
                 
                 # Compact the selected jet buffers before writing.
                 data = ak.to_packed(data)
@@ -201,6 +206,7 @@ def make_signal_data(
     variables.update(
         event_aware=True,
         source_files=files,
+        keep_labels=keep_labels,
     )
 
     with open(path, "w") as stream:
@@ -217,6 +223,20 @@ def _add_response_vars(data):
     data['jet_ptRaw_div_ptGen'] = ak.nan_to_num(
         data['jet_pt_raw'] / data['jet_genmatch_pt'], copy=True, nan=0.0, posinf=0.0, neginf=0.0
     )
+
+def _keep_label_indices(keep_labels, class_labels):
+    """Select a subset without changing the shared class-to-ID mapping."""
+    if keep_labels is None:
+        return None
+    if not isinstance(keep_labels, (list, tuple)) or not keep_labels:
+        raise ValueError("keep_labels must be a nonempty list of class names")
+    if any(not isinstance(name, str) for name in keep_labels):
+        raise ValueError("keep_labels must contain class names")
+    missing = set(keep_labels) - set(class_labels)
+    if missing:
+        raise ValueError(f"keep_labels not present in classes: {sorted(missing)}")
+    return [class_labels[name] for name in keep_labels]
+
 
 def _split_sc8_labels(
     data, label_branch, class_labels, drop_unknown=True
@@ -638,8 +658,31 @@ def make_data(
     pt_min=None,
     pt_max=None,
 ):
-    source = _uproot_source(infile, tree)
-    num_entries = sum(item[-1] for item in uproot.num_entries(source))
+    class_labels = {
+        name: index for index, name in enumerate(classes or [])
+    }
+    # Legacy paths/lists still work. New groups may select labels independently.
+    if isinstance(infile, dict):
+        samples = [infile]
+    elif isinstance(infile, (list, tuple)) and any(isinstance(item, dict) for item in infile):
+        if not all(isinstance(item, dict) for item in infile):
+            raise ValueError("Do not mix input groups and plain paths in input")
+        samples = infile
+    else:
+        samples = [{"input": infile}]
+
+    sources = []
+    for sample in samples:
+        if sample.get("keep_labels") is not None and label_branch is None:
+            raise ValueError("keep_labels requires a label_branch, e.g. sc8_label")
+        keep_indices = _keep_label_indices(sample.get("keep_labels"), class_labels)
+        sources.append((_uproot_source(sample["input"], tree), keep_indices))
+
+    num_entries = sum(
+        item[-1]
+        for source, _ in sources
+        for item in uproot.num_entries(source)
+    )
 
     if num_entries == 0:
         raise ValueError(f"No entries found in {infile}")
@@ -658,20 +701,20 @@ def make_data(
     with open(os.path.join(outdir, "metadata.json"), "w") as stream:
         json.dump([], stream)
 
-    class_labels = {
-        name: index for index, name in enumerate(classes or [])
-    }
-
     filters = [FILTER_PATTERN]
     if label_branch is not None:
         filters.append(label_branch)
 
-    iterator = uproot.iterate(
-        source,
-        filter_name=filters,
-        how="zip",
-        step_size=step_size,
-        num_workers=num_workers,
+    iterator = (
+        (data, keep_indices)
+        for source, keep_indices in sources
+        for data in uproot.iterate(
+            source,
+            filter_name=filters,
+            how="zip",
+            step_size=step_size,
+            num_workers=num_workers,
+        )
     )
 
     chunk = 0
@@ -680,7 +723,7 @@ def make_data(
     print("Input entries:", num_entries)
 
     with tqdm(total=num_entries, unit="jets") as pbar:
-        for data in iterator:
+        for data, keep_indices in iterator:
             entries_done += len(data)
             pbar.update(len(data))
             pbar.set_description(f"Processing chunk {chunk}")
@@ -705,6 +748,11 @@ def make_data(
                     data_split, class_labels = _split_sc8_labels(
                         data, label_branch, class_labels
                     )
+
+                if keep_indices is not None:
+                    data_split = data_split[
+                        np.isin(ak.to_numpy(data_split["class_label"]), keep_indices)
+                    ]
 
                 if len(data_split):
                     _process_chunk(
@@ -748,3 +796,4 @@ def make_data_from_config(config_file, force=False):
             num_workers=int(config.get('num_workers', 8)),
             append=True,
         )
+

@@ -71,6 +71,12 @@ if __name__ == "__main__":
                     f"Old-format output: {signal['output']}. "
                     "Use a fresh output directory."
                 )
+
+            if metadata.get("keep_labels") != signal.get("keep_labels"):
+                raise RuntimeError(
+                    f"Label selection changed: {signal['output']}. "
+                    "Use a fresh output directory to regenerate this sample."
+                )
     
             print(f"Signal output exists, skipping: {signal['output']}")
             continue
@@ -83,5 +89,7 @@ if __name__ == "__main__":
             ratio=signal.get("ratio", 1.0),
             pt_min=signal.get("pt_min"),
             pt_max=signal.get("pt_max"),
+            keep_labels=signal.get("keep_labels"),
             **common,
         )
+

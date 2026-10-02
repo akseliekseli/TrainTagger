@@ -1070,7 +1070,8 @@ def basic(model, signal_dirs):
             "/eos/user/a/asuutari/FastPUPPI/"
             "XtoHH-qcd-minbias/signal_process_data/MinBias"
         ),
-        max_chunks=10,  # None for the full dataset; applies to BOTH plots.
+        score_classes=("H_bb", "H_cc", "H_qq", "H_gg"),
+        max_chunks=None,  # None for the full dataset; applies to BOTH plots.
         batch_size=4096,
     )
     print(f"RUNTIME: load_plot_data {time.time()-start:.3f} s")

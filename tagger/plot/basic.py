@@ -23,6 +23,17 @@ from tagger.plot import style
 from tagger.plot.nprong.plot_data import load_plot_data
 from tagger.plot.nprong.plot_roc_bins import plot_ROC_bins
 from tagger.plot.nprong.plot_turn_on_curve_mass import plot_turn_on_curve_mass
+from tagger.plot.nprong.plot_auc_pt import (
+    plot_auc_jet_pt,
+    plot_auc_gen_pt,
+)
+from tagger.plot.analysis.plot_scores_vs_pt import (
+    plot_signal_scores_vs_pt,
+    plot_background_scores_vs_pt,
+)
+from tagger.plot.analysis.plot_tsne import plot_tsne
+
+from tagger.plot.nprong.plot_auc_mass import plot_auc_mass
 
 import hgq
 
@@ -278,12 +289,15 @@ def ROC_vs_background(y_pred, y_test, class_labels, plot_dir, ROC_dict, bkg_idx)
         )
 
     # Create a plot for ROC curves
+    auc_list = []
     fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
     hep.cms.label(llabel=style.CMSHEADER_LEFT, rlabel=style.CMSHEADER_RIGHT, ax=ax, fontsize=style.CMSHEADER_SIZE)
     for class_label, i in sorted(
         class_labels.items(), key=lambda item: item[1]
     ):
-        background_idx = class_labels["QCD"]
+        background_idx = bkg_idx
+        if i == background_idx:
+            continue
 
         signal_mask = y_test[:, i] == 1
         background_mask = y_test[:, background_idx] == 1
@@ -291,7 +305,7 @@ def ROC_vs_background(y_pred, y_test, class_labels, plot_dir, ROC_dict, bkg_idx)
         
         # Get true labels and predicted probabilities for the current class
         # Extract the one-hot column for the current class
-        y_true = y_test[:, i]
+        y_true = y_test[mask, i]
         y_score = (
             y_pred[mask, i]
             / (y_pred[mask, i] + y_pred[mask, background_idx] + 1e-12)
@@ -319,6 +333,7 @@ def ROC_vs_background(y_pred, y_test, class_labels, plot_dir, ROC_dict, bkg_idx)
         print(f"FPR at TPR for {class_label} ≈ 0.5 (actual TPR = {tpr[idx]:.4f}): {fpr[idx]:.4f}, AUC: {roc_auc:.4f}")
 
         ROC_dict[class_label] = roc_auc
+        auc_list.append(roc_auc)
         # Plot the ROC curve for the current class
         ax.plot(
             tpr,
@@ -333,8 +348,7 @@ def ROC_vs_background(y_pred, y_test, class_labels, plot_dir, ROC_dict, bkg_idx)
     ax.set_ylabel('Mistag Rate')
     ax.set_xlabel('Signal Efficiency')
 
-    auc_list = [value for key, value in ROC_dict.items()]
-    handles, labels = plt.gca().get_legend_handles_labels()
+    handles, labels = ax.get_legend_handles_labels()
     order = np.argsort(auc_list)
     ax.legend(
         [handles[idx] for idx in order],
@@ -1060,40 +1074,113 @@ def basic(model, signal_dirs):
     # ROC_dict = {class_label: 0 for class_label in model.class_labels}
     ROC_dict = {}
     start = time.time()
+    data_dir = (
+        "/eos/home-a/asuutari/FastPUPPI/"
+        "XtoHH-qcd-minbias-label-selected-large-chunks"
+    )
+    
     plot_data = load_plot_data(
         model,
-        signal_dir=(
-            "/eos/user/a/asuutari/FastPUPPI/"
-            "XtoHH-qcd-minbias/signal_process_data/XtoHH"
-        ),
-        background_dir=(
-            "/eos/user/a/asuutari/FastPUPPI/"
-            "XtoHH-qcd-minbias/signal_process_data/MinBias"
-        ),
-        score_classes=("H_bb", "H_cc", "H_qq", "H_gg"),
-        max_chunks=None,  # None for the full dataset; applies to BOTH plots.
+        signal_dir=os.path.join(data_dir, "signal_process_data", "XtoHH"),
+        background_dir=os.path.join(data_dir, "signal_process_data", "MinBias"),
+        score_classes=("2-prong",),
+        # score_classes=("H_bb", "H_cc", "H_gg", "H_qq"),
         batch_size=4096,
+        max_chunks=None,
+        include_gen_pt=True,
+        include_jet_mass=True,
+        include_gen_mass=True,
     )
     print(f"RUNTIME: load_plot_data {time.time()-start:.3f} s")
 
+    from tagger.plot.nprong.plot_scores_vs_pt import (
+        plot_signal_scores_vs_pt,
+        plot_background_scores_vs_pt,
+    )
+    
+    plot_signal_scores_vs_pt(plot_data)
+    plot_background_scores_vs_pt(
+        plot_data,
+        background_classes=("QCD*",),
+    )
+
     start = time.time()
+    
     plot_ROC_bins(
         plot_data,
+        signal_classes={
+            "2-prong": ("H_bb", "H_cc", "H_qq", "H_gg"),
+        },
         background_classes=("QCD_bb", "QCD_b", "QCD_cc", "QCD_c", "QCD_others"),
         mass_targets=(30, 50, 90),
         mass_window=2.0,
     )
+    """
+    plot_ROC_bins(
+        plot_data,
+        signal_classes=("H_bb", "H_cc", "H_qq", "H_gg"),
+        background_classes=("QCD_bb", "QCD_b", "QCD_cc", "QCD_c", "QCD_others"),
+        mass_targets=(30, 50, 90),
+        mass_window=2.0,
+    )
+    """
     print(f"RUNTIME: plot_ROC_bins {time.time()-start:.3f} s")
 
     start = time.time()
     plot_turn_on_curve_mass(
         plot_data,
+        signal_classes=("H_bb", "H_cc", "H_qq", "H_gg"),
         mass_centers=(20, 30, 40, 50, 60, 70, 80, 90),
         mass_window=2.0,
-        score_cuts=(0.0, 0.85, 0.95, 0.96),
+        pt_cuts=(0.0, 50.0, 100.0),
         target_rate_hz=50000,
     )
     print(f"RUNTIME: plot_turn_on_curve_mass {time.time()-start:.3f} s")
+    
+    from tagger.plot.nprong.plot_turn_on_curve_pT import plot_turn_on_curve_pT
+    from tagger.plot.nprong.plot_turn_on_curve_pT_3mass import plot_turn_on_curve_pT_3mass
+    
+    plot_turn_on_curve_pT(
+        plot_data,
+        study_masses=(30, 50),
+        window=2.0,
+        fixed_pt_cuts=(90, 111),
+        fixed_score_cuts=(None,),  # Genuinely score-free baseline
+        target_rate_hz=50000,
+    )
+    
+    plot_turn_on_curve_pT_3mass(
+        plot_data,
+        target_mh_masses=(30, 50, 90),
+        window=2.0,
+        fixed_pt_cut=100,
+        target_rate_hz=50000,
+    )
+    
+    plot_signal_scores_vs_pt(plot_data)
+    plot_background_scores_vs_pt(plot_data)
+    auc_options = {
+        "signal_classes": ("H_bb", "H_cc", "H_qq", "H_gg"),
+        "background_classes": ("QCD_*",),
+        "pt_bins": (0, 50, 75, 100, 125, 150, 200, 300, 500, 800),
+        "mass_targets": (30, 50, 90),
+        "mass_window": 2.0,
+    }
+    
+    plot_auc_jet_pt(plot_data, **auc_options)
+    plot_auc_gen_pt(plot_data, **auc_options)
+    
+    mass_options = {
+        "signal_classes": ("H_bb", "H_cc", "H_qq", "H_gg"),
+        "background_classes": ("QCD*",),
+        "mass_bins": (0, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200),
+        "mass_targets": (30, 50, 90),
+        "mass_window": 2.0,
+    }
+    
+    plot_auc_mass(plot_data, mass_field="mass", **mass_options)
+    plot_auc_mass(plot_data, mass_field="gen_mass", **mass_options)
+
     del plot_data
 
     # Load the testing data
@@ -1102,6 +1189,23 @@ def basic(model, signal_dirs):
     truth_pt_test = np.load(f"{model.output_directory}/testing_data/truth_pt_test.npy")
     reco_pt_test = np.load(f"{model.output_directory}/testing_data/reco_pt_test.npy")
 
+    from tagger.plot.nprong.plot_roc_score_definitions import plot_ROC_score_definitions
+
+    plot_ROC_score_definitions(
+        y_pred,
+        y_test,
+        model.class_labels,
+        plot_dir,
+    )
+    plot_tsne(
+        model,
+        X_test,
+        y_test,
+        max_per_class=1000,
+        perplexity=30,
+        seed=42,
+    )
+
     model_outputs = model.predict(X_test)
     
     hgq.utils.minmax_trace.trace_minmax(model.jet_model, X_test[0:1000],verbose=2)
@@ -1109,7 +1213,7 @@ def basic(model, signal_dirs):
     y_pred, pt_ratio = model_outputs[0], model_outputs[1]
      # Plot ROC curves
     ROC_dict = ROC(y_pred, y_test, model.class_labels, plot_dir, ROC_dict)
-    ROC_vs_background(y_pred, y_test, model.class_labels, plot_dir, ROC_dict, model.class_labels["QCD"])
+    ROC_vs_background(y_pred, y_test, model.class_labels, plot_dir, ROC_dict, model.class_labels["1-prong"])
     class_pairs = []
     # Generate all possible pairs of classes
     for i in model.class_labels.keys():
@@ -1212,10 +1316,10 @@ def basic(model, signal_dirs):
     # response(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # # Plot the rms of the residuals vs pt
-    rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
+    # rms(model.class_labels, y_test, truth_pt_test, reco_pt_test, pt_ratio, plot_dir)
 
     # # Plot the shaply feature importance
-    plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
+    # plot_shaply(model, X_test, model.class_labels, model.input_vars, plot_dir)
 
     return ROC_dict
 

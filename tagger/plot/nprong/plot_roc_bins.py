@@ -137,6 +137,7 @@ def _save(fig, ax, output_path, bin_labels, linestyles, curves_drawn, score_clas
     ax.set_xlabel("Signal Efficiency")
     ax.set_ylabel("Background Efficiency")
     ax.set_yscale("log")
+    ax.set_ylim(1e-3, 1)
     ax.set_xlim(-0.02, 1.02)
     ax.grid(True)
     fig.tight_layout()
@@ -186,11 +187,26 @@ def plot_ROC_fixed_mass_pt_bins(data, output_path="plots/ROC_fixed_mass_pt_bins"
     _save(fig, ax, Path(output_path), bin_labels, BIN_LS, curves_drawn, score_classes, mass_label)
 
 
-def plot_ROC_bins(plot_data, *, background_classes, output_dir=None,
-                  mass_targets=(), mass_window=2.0, min_jets=10):
+def plot_ROC_bins(plot_data, *, background_classes, signal_classes=None,
+                  output_dir=None, mass_targets=(), mass_window=2.0,
+                  min_jets=10):
     """Calculate and draw per-class ROCs without ROOT reads or model inference."""
     mass_targets = tuple(mass_targets)
     score_classes = tuple(plot_data["score_classes"])
+    if signal_classes is None:
+        signal_classes = score_classes
+    
+    signal_groups = (
+        signal_classes
+        if isinstance(signal_classes, dict)
+        else {name: (name,) for name in signal_classes}
+    )
+    signal_classes = tuple(signal_groups)
+    score_columns = (
+        [0] * len(signal_classes)
+        if len(score_classes) == 1
+        else [score_classes.index(name) for name in signal_classes]
+    )
     if not np.isfinite(mass_window) or mass_window <= 0 or min_jets < 1:
         raise ValueError("mass_window and min_jets must be positive")
     if len(set(mass_targets)) != len(mass_targets) or any(
@@ -209,13 +225,18 @@ def plot_ROC_bins(plot_data, *, background_classes, output_dir=None,
         matched_classes.extend(matches)
     matched_classes = list(dict.fromkeys(matched_classes))
     background_ids = [background["source_labels"][name] for name in matched_classes]
-    print("ROC scores: individual class probabilities; background labels:", matched_classes, flush=True)
+    score_by_flavor = {
+        name: score_classes[column]
+        for name, column in zip(signal_classes, score_columns)
+    }
+    print("ROC scores by signal category:", score_by_flavor, flush=True)
+    print("ROC background labels:", matched_classes, flush=True)
 
-    counts = {"ROC_pt_bins": _empty_counts(len(PT_BINS), len(score_classes))}
+    counts = {"ROC_pt_bins": _empty_counts(len(PT_BINS), len(signal_classes))}
     if mass_targets:
-        counts["ROC_mass_slices"] = _empty_counts(len(mass_targets), len(score_classes))
+        counts["ROC_mass_slices"] = _empty_counts(len(mass_targets), len(signal_classes))
     for mass in mass_targets:
-        counts[f"ROC_fixed_mass_pt_bins_m{mass:g}"] = _empty_counts(len(PT_BINS), len(score_classes))
+        counts[f"ROC_fixed_mass_pt_bins_m{mass:g}"] = _empty_counts(len(PT_BINS), len(signal_classes))
 
     # Slice only compact arrays; never copy the full dataset into each selection.
     for start in range(0, len(signal["pt"]), 100000):
@@ -223,27 +244,31 @@ def plot_ROC_bins(plot_data, *, background_classes, output_dir=None,
         mass = signal["higgs_mass"][start:stop]
         labels = signal["class_label"][start:stop]
         flavor_masks = {
-            name: np.isfinite(mass) & (labels == signal["source_labels"][name])
-            for name in score_classes
+            name: np.isfinite(mass) & np.isin(
+                labels,
+                [signal["source_labels"][label] for label in source_labels],
+            )
+            for name, source_labels in signal_groups.items()
         }
-        jets = {"pt": signal["pt"][start:stop], "tagger": signal["scores"][start:stop],
+        jets = {"pt": signal["pt"][start:stop], "tagger": signal["scores"][start:stop][:, score_columns],
                 "higgs_mass": mass}
         _accumulate_signal(counts, jets, flavor_masks, mass_targets, mass_window)
     for start in range(0, len(background["pt"]), 100000):
         stop = start + 100000
         selected = np.isin(background["class_label"][start:stop], background_ids)
         jets = {"pt": background["pt"][start:stop][selected],
-                "tagger": background["scores"][start:stop][selected]}
+                "tagger": background["scores"][start:stop][selected][:, score_columns]}
         _accumulate_background(counts, jets, mass_targets)
 
     output_dir = Path(output_dir or Path(plot_data["output_directory"]) / "plots/nprong/ROC_bins")
     output_dir.mkdir(parents=True, exist_ok=True)
     result = {
         "score_classes": score_classes, "thresholds": SCORE_CUTS.tolist(),
-        "score_definition": "Raw P(flavor) for signal and background; no sum or ratio",
+        "score_definition": "Raw model probability per signal category; no sum or ratio",
+        "score_by_flavor": score_by_flavor,
         "background_classes": matched_classes, "background_labels": background["source_labels"],
         "signal_dir": signal["directory"], "background_dir": background["directory"],
-        "flavors": score_classes, "mass_targets": mass_targets, "mass_window": mass_window,
+        "flavors": signal_classes, "mass_targets": mass_targets, "mass_window": mass_window,
         "source_labels": signal["source_labels"], "max_chunks": plot_data["max_chunks"],
         "signal_chunks_read": signal["n_chunks"], "background_chunks_read": background["n_chunks"],
         "truth_definition": "PDG25 spatial matching + saved per-jet class_label",
@@ -252,14 +277,14 @@ def plot_ROC_bins(plot_data, *, background_classes, output_dir=None,
     }
     with (output_dir / "ROC_bins_counts.json").open("w") as stream:
         json.dump(result, stream, indent=2)
-    plot_ROC_pt_bins(counts, output_dir / "ROC_pt_bins", min_jets=min_jets, score_classes=score_classes)
+    plot_ROC_pt_bins(counts, output_dir / "ROC_pt_bins", min_jets=min_jets, score_classes=signal_classes)
     if mass_targets:
         plot_ROC_mass_slices(counts, output_dir / "ROC_mass_slices",
                             mass_targets=mass_targets, mass_window=mass_window, min_jets=min_jets,
-                            score_classes=score_classes)
+                            score_classes=signal_classes)
     for mass in mass_targets:
         plot_ROC_fixed_mass_pt_bins(counts, output_dir / f"ROC_fixed_mass_pt_bins_m{mass:g}",
                                    mass_target=mass, mass_window=mass_window, min_jets=min_jets,
-                                   score_classes=score_classes)
+                                   score_classes=signal_classes)
     return result
 

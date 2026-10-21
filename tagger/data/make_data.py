@@ -48,6 +48,7 @@ if __name__ == "__main__":
         infile=config["input"],
         outdir=config["output"],
         ratio=processing.get("ratio", 1.0),
+        jets_per_chunk=processing.get("jets_per_chunk", 100000),
         **common,
     )
 
@@ -85,7 +86,7 @@ if __name__ == "__main__":
             infile=signal["input"],
             outdir=signal["output"],
             event_tree=signal.get("event_tree", "outnanoSC8/Events"),
-            events_per_chunk=signal.get("events_per_chunk", 1000),
+            events_per_chunk=signal.get("events_per_chunk", 10000),
             ratio=signal.get("ratio", 1.0),
             pt_min=signal.get("pt_min"),
             pt_max=signal.get("pt_max"),

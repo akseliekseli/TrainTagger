@@ -54,9 +54,14 @@ def _match_signal(jets, events, groups):
     if not np.isfinite(jet_eta).all() or not np.isfinite(jet_phi).all():
         raise ValueError("Nonfinite jet eta/phi")
     matched_mass = np.full(len(jet_eta), np.nan)
+    matched_gen_pt = np.full(len(jet_eta), np.nan) if "GenJetAK8_pt" in events else None
+    matched_gen_mass = np.full(len(jet_eta), np.nan) if "GenJetAK8_mass" in events else None
     # Convert once per chunk, rather than slicing Awkward arrays in every event.
     generator = {}
-    for name in GEN_FIELDS:
+    gen_fields = GEN_FIELDS + (("GenJetAK8_pt",) if matched_gen_pt is not None else ())
+    if matched_gen_mass is not None:
+        gen_fields += ("GenJetAK8_mass",)
+    for name in gen_fields:
         lengths = ak.to_numpy(ak.num(events[name], axis=1))
         offsets = np.r_[0, np.cumsum(lengths)]
         generator[name] = (ak.to_numpy(ak.flatten(events[name], axis=1)), offsets)
@@ -86,7 +91,12 @@ def _match_signal(jets, events, groups):
         matched &= dr_gh[closest_genjet, closest_higgs[closest_genjet]] < 0.8**2
         masses = gen["GenPart_mass"][is_higgs][closest_higgs[closest_genjet]]
         matched_mass[jet_indices[matched]] = masses[matched]
-    return matched_mass
+        if matched_gen_pt is not None:
+            gen_pt = gen["GenJetAK8_pt"][closest_genjet[matched]]
+            matched_gen_pt[jet_indices[matched]] = gen_pt
+        if matched_gen_mass is not None:
+            matched_gen_mass[jet_indices[matched]] = gen["GenJetAK8_mass"][closest_genjet[matched]]
+    return matched_mass, matched_gen_pt, matched_gen_mass
 
 
 def _predict(model, inputs, columns, batch_size):
@@ -109,7 +119,8 @@ def _predict(model, inputs, columns, batch_size):
     return scores, tagger
 
 
-def _load_sample(model, directory, *, signal, score_classes, columns, batch_size, max_chunks):
+def _load_sample(model, directory, *, signal, score_classes, columns, batch_size, max_chunks,
+                 include_gen_pt, include_jet_mass, include_gen_mass):
     directory = Path(directory)
     with (directory / "variables.json").open() as stream:
         variables = json.load(stream)
@@ -125,12 +136,16 @@ def _load_sample(model, directory, *, signal, score_classes, columns, batch_size
     ids = list(source_labels.values())
     if any(type(index) is not int or index < 0 for index in ids) or len(set(ids)) != len(ids):
         raise ValueError("Dataset outputs must map names to unique nonnegative integer IDs")
-    if signal and set(score_classes) - set(source_labels):
-        raise ValueError(f"Signal labels must include {score_classes}")
 
     parts = {name: [] for name in ("pt", "scores", "tagger", "class_label", "event_index")}
+    if include_jet_mass:
+        parts["mass"] = []
     if signal:
         parts["higgs_mass"] = []
+        if include_gen_pt:
+            parts["gen_pt"] = []
+        if include_gen_mass:
+            parts["gen_mass"] = []
     n_events = 0
     seen_paths = set()
     for chunk_index, entry in enumerate(metadata, 1):
@@ -145,10 +160,17 @@ def _load_sample(model, directory, *, signal, score_classes, columns, batch_size
             started = perf_counter()
             with uproot.open(path, object_cache=None, array_cache=None) as root:
                 fields = [*KEYS, "nn_inputs", "jet_pt_phys", "class_label"]
+                if include_jet_mass:
+                    fields += ["jet_mass_phys"]
                 if signal:
                     fields += ["jet_eta_phys", "jet_phi_phys"]
                 jets = _read(root["data"], fields)
-                events = _read(root["events"], (*KEYS, *GEN_FIELDS) if signal else KEYS)
+                event_fields = (*KEYS, *GEN_FIELDS) if signal else KEYS
+                if signal and include_gen_pt:
+                    event_fields += ("GenJetAK8_pt",)
+                if signal and include_gen_mass:
+                    event_fields += ("GenJetAK8_mass",)
+                events = _read(root["events"], event_fields)
             pt = ak.to_numpy(jets["jet_pt_phys"])
             if len(pt) != entry["entries"]:
                 raise ValueError("Jet count differs from metadata")
@@ -164,7 +186,13 @@ def _load_sample(model, directory, *, signal, score_classes, columns, batch_size
             started = perf_counter()
             groups, event_index = _groups(jets, events)
             if signal:
-                parts["higgs_mass"].append(_match_signal(jets, events, groups))
+                matched_mass, matched_gen_pt, matched_gen_mass = _match_signal(jets, events, groups)
+                parts["higgs_mass"].append(matched_mass)
+                if include_gen_pt:
+                    parts["gen_pt"].append(matched_gen_pt)
+                if include_gen_mass:
+                    parts["gen_mass"].append(matched_gen_mass)
+                del matched_mass, matched_gen_pt, matched_gen_mass
             event_index += n_events
             n_events += len(events["event"])
             del groups, events
@@ -173,6 +201,8 @@ def _load_sample(model, directory, *, signal, score_classes, columns, batch_size
             scores, tagger = _predict(model, jets["nn_inputs"], columns, batch_size)
             print(f"  Predict: {perf_counter()-started:.2f}s", flush=True)
             parts["pt"].append(pt.copy())
+            if include_jet_mass:
+                parts["mass"].append(ak.to_numpy(jets["jet_mass_phys"]).copy())
             parts["class_label"].append(labels.copy())
             parts["event_index"].append(event_index)
             parts["scores"].append(scores)
@@ -192,12 +222,16 @@ def _load_sample(model, directory, *, signal, score_classes, columns, batch_size
 
 
 def load_plot_data(model, signal_dir, background_dir, *, score_classes,
-                   batch_size=4096, max_chunks=None):
+                   batch_size=4096, max_chunks=None, include_gen_pt=False,
+                   include_jet_mass=False, include_gen_mass=False):
     """Return reusable NumPy plot data; no open ROOT files or constituent arrays.
 
     Memory scales with compact per-jet arrays, not the full ROOT contents.
     max_chunks selects the first N metadata entries separately for each sample.
     scores columns follow score_classes; tagger is their unnormalised sum.
+    include_gen_pt retains matched GenJetAK8_pt for the pT plots.
+    include_jet_mass retains jet_mass_phys for both samples.
+    include_gen_mass retains matched GenJetAK8_mass for signal.
     """
     if not isinstance(score_classes, (list, tuple)) or not score_classes:
         raise ValueError("score_classes must be a nonempty list or tuple of names")
@@ -216,6 +250,8 @@ def load_plot_data(model, signal_dir, background_dir, *, score_classes,
             "output_directory": str(model.output_directory)}
     for name, directory in (("background", background_dir), ("signal", signal_dir)):
         data[name] = _load_sample(model, directory, signal=name == "signal", columns=columns,
-                                  score_classes=score_classes, batch_size=batch_size, max_chunks=max_chunks)
+                                  score_classes=score_classes, batch_size=batch_size, max_chunks=max_chunks,
+                                  include_gen_pt=include_gen_pt, include_jet_mass=include_jet_mass,
+                                  include_gen_mass=include_gen_mass)
     return data
 

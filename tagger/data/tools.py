@@ -35,7 +35,7 @@ def make_signal_data(
     pt_min=None,
     pt_max=None,
     event_tree="outnanoSC8/Events",
-    events_per_chunk=1000,
+    events_per_chunk=10000,
     keep_labels=None,
 ):
     if ratio != 1.0 or events_per_chunk < 1:
@@ -86,6 +86,9 @@ def make_signal_data(
         "source_id", "jet_reject",
     ]
     chunk = 0
+    jet_parts = []
+    event_parts = []
+    buffered_events = 0
 
     for source_id, filename in enumerate(files):
         print(f"Processing complete events: {filename}", flush=True)
@@ -127,8 +130,9 @@ def make_signal_data(
                     f"Jets are not ordered like Events in {filename}"
                 )
 
-            for start in range(0, len(ek), events_per_chunk):
-                stop = min(start + events_per_chunk, len(ek))
+            start = 0
+            while start < len(ek):
+                stop = min(start + events_per_chunk - buffered_events, len(ek))
 
                 # All jets belonging to this complete batch of events.
                 first, last = np.searchsorted(
@@ -190,12 +194,34 @@ def make_signal_data(
                     stop - start, source_id, dtype=np.int64
                 )
 
-                _process_chunk(
-                    data, tag, extras, n_parts, chunk, outdir,
-                    additional_fields=stored,
-                    events=events,
-                )
-                chunk += 1
+                jet_parts.append(data)
+                event_parts.append(events)
+                buffered_events += stop - start
+                start = stop
+
+                if buffered_events == events_per_chunk:
+                    _process_chunk(
+                        ak.concatenate(jet_parts), tag, extras, n_parts, chunk, outdir,
+                        additional_fields=stored,
+                        events={
+                            name: ak.concatenate([part[name] for part in event_parts])
+                            for name in event_parts[0]
+                        },
+                    )
+                    chunk += 1
+                    jet_parts.clear()
+                    event_parts.clear()
+                    buffered_events = 0
+
+    if event_parts:
+        _process_chunk(
+            ak.concatenate(jet_parts), tag, extras, n_parts, chunk, outdir,
+            additional_fields=stored,
+            events={
+                name: ak.concatenate([part[name] for part in event_parts])
+                for name in event_parts[0]
+            },
+        )
 
     _save_dataset_metadata(outdir, labels, tag, extras)
 
@@ -657,6 +683,7 @@ def make_data(
     label_branch=None,
     pt_min=None,
     pt_max=None,
+    jets_per_chunk=100000,
 ):
     class_labels = {
         name: index for index, name in enumerate(classes or [])
@@ -719,6 +746,8 @@ def make_data(
 
     chunk = 0
     entries_done = 0
+    jet_parts = []
+    buffered_jets = 0
     print("Output directory:", outdir)
     print("Input entries:", num_entries)
 
@@ -754,14 +783,28 @@ def make_data(
                         np.isin(ak.to_numpy(data_split["class_label"]), keep_indices)
                     ]
 
-                if len(data_split):
-                    _process_chunk(
-                        data_split, tag, extras, n_parts, chunk, outdir
-                    )
-                    chunk += 1
+                start = 0
+                while start < len(data_split):
+                    stop = min(start + jets_per_chunk - buffered_jets, len(data_split))
+                    jet_parts.append(ak.to_packed(data_split[start:stop]))
+                    buffered_jets += stop - start
+                    start = stop
+
+                    if buffered_jets == jets_per_chunk:
+                        _process_chunk(
+                            ak.concatenate(jet_parts), tag, extras, n_parts, chunk, outdir
+                        )
+                        chunk += 1
+                        jet_parts.clear()
+                        buffered_jets = 0
 
             if entries_done / num_entries >= ratio:
                 break
+
+    if jet_parts:
+        _process_chunk(
+            ak.concatenate(jet_parts), tag, extras, n_parts, chunk, outdir
+        )
 
     _save_dataset_metadata(outdir, class_labels, tag, extras)
 

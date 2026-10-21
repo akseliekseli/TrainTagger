@@ -34,14 +34,30 @@ def _working_point(pt, scores, score_cut, target_rate_hz, total_rate_hz):
     budget = int(target_rate_hz / total_rate_hz * n)
     if len(eligible) <= budget:
         threshold = 0.0  # Already below target; do not produce a negative pT cut.
-    elif budget == 0:
-        threshold = float(np.max(eligible))  # Strict > gives zero passing events.
     else:
-        # Same normal-case selection as util.find_pt_threshold: sorted_pts[-budget].
-        threshold = float(np.partition(eligible, len(eligible) - budget)[-budget])
+        index = len(eligible) - budget - 1
+        threshold = float(np.partition(eligible, index)[index])
     passed = int(np.sum((pt > threshold) & _score_pass(scores, score_cut)))
     return {
         "score_cut": score_cut, "pt_threshold": threshold,
+        "background_pass": passed, "background_events": n,
+        "achieved_rate_hz": passed / n * total_rate_hz,
+        "rate_step_hz": total_rate_hz / n,
+    }
+
+
+def _score_working_point(pt, scores, pt_cut, target_rate_hz, total_rate_hz):
+    n = len(pt)
+    eligible = scores[pt > pt_cut]
+    budget = int(target_rate_hz / total_rate_hz * n)
+    if len(eligible) <= budget:
+        score_cut = None
+    else:
+        index = len(eligible) - budget - 1
+        score_cut = float(np.partition(eligible, index)[index])
+    passed = int(np.sum((pt > pt_cut) & _score_pass(scores, score_cut)))
+    return {
+        "score_cut": score_cut, "pt_threshold": pt_cut,
         "background_pass": passed, "background_events": n,
         "achieved_rate_hz": passed / n * total_rate_hz,
         "rate_step_hz": total_rate_hz / n,
@@ -59,25 +75,24 @@ def _interval(k, n, confidence=0.6827):
 
 def plot_turn_on_curve_mass(plot_data, *,
                             mass_centers=(20, 30, 40, 50, 60, 70, 80, 90),
-                            mass_window=2.0, score_cuts=(0.0, 0.85, 0.95, 0.96),
+                            mass_window=2.0, pt_cuts=(0.0, 50.0, 100.0),
+                            signal_classes=("H_bb", "H_cc", "H_qq", "H_gg"),
                             target_rate_hz=50000, n_bunches=2760,
                             revolution_frequency_hz=11246, output_dir=None):
     """No ROOT reads or inference. Score sums the outputs selected at loading."""
-    mass_centers, score_cuts = tuple(mass_centers), tuple(score_cuts)
+    mass_centers, pt_cuts = tuple(mass_centers), tuple(pt_cuts)
     score_classes = tuple(plot_data["score_classes"])
     if not mass_centers or len(set(mass_centers)) != len(mass_centers):
         raise ValueError("Specify unique mass centers")
     if any(not np.isfinite(m) or m < 0 for m in mass_centers) or not np.isfinite(mass_window) or mass_window <= 0:
         raise ValueError("Mass centers must be finite/nonnegative and window finite/positive")
-    if not score_cuts or any(c is not None and (not np.isfinite(c) or not 0 <= c <= 1) for c in score_cuts):
-        raise ValueError("Score cuts must be None or finite numbers between 0 and 1")
     total_rate = n_bunches * revolution_frequency_hz
     if not np.isfinite(total_rate) or total_rate <= 0 or not 0 < target_rate_hz < total_rate:
         raise ValueError("Invalid rate normalization or target rate")
 
     signal, background = plot_data["signal"], plot_data["background"]
     print("Turn-on score: " + " + ".join(score_classes), flush=True)
-    print("Signal: leading matched jet per mass window, all decay labels. "
+    print("Signal: leading merged, matched jet per mass window, selected by source labels. "
           "MinBias: leading jet, all saved events including zero jets.", flush=True)
 
     # Do not use the ROC's QCD-label filter here.
@@ -88,8 +103,10 @@ def plot_turn_on_curve_mass(plot_data, *,
     mb_pt[event_indices] = background["pt"][leaders]
     mb_score[event_indices] = background["tagger"][leaders]
     working_points = [
-        _working_point(mb_pt, mb_score, cut, target_rate_hz, total_rate)
-        for cut in score_cuts
+        _working_point(mb_pt, mb_score, None, target_rate_hz, total_rate)
+    ] + [
+        _score_working_point(mb_pt, mb_score, pt_cut, target_rate_hz, total_rate)
+        for pt_cut in pt_cuts
     ]
     del leaders, event_indices, mb_pt, mb_score
 
@@ -100,11 +117,14 @@ def plot_turn_on_curve_mass(plot_data, *,
         if wp["background_pass"] < 10:
             print("  WARNING: fewer than 10 passing MinBias events; rate estimate has limited statistics", flush=True)
 
+    signal_indices = [signal["source_labels"][name] for name in signal_classes]
+    merged = np.isin(signal["class_label"], signal_indices)
+
     numerator = np.zeros((len(working_points), len(mass_centers)), dtype=np.int64)
     denominator = np.zeros(len(mass_centers), dtype=np.int64)
     for mass_index, mass in enumerate(mass_centers):
         # Strict boundaries are unchanged from the original turn-on function.
-        matched = np.abs(signal["higgs_mass"] - mass) < mass_window
+        matched = merged & (np.abs(signal["higgs_mass"] - mass) < mass_window)
         leaders = _leading_indices(signal, matched)
         denominator[mass_index] = len(leaders)
         pt, score = signal["pt"][leaders], signal["tagger"][leaders]
@@ -117,12 +137,18 @@ def plot_turn_on_curve_mass(plot_data, *,
         "signal_dir": signal["directory"], "background_dir": background["directory"],
         "score_classes": score_classes, "mass_centers": mass_centers, "mass_window": mass_window,
         "target_rate_hz": target_rate_hz, "total_mb_rate_hz": total_rate,
+        "pt_cuts": pt_cuts, "signal_classes": list(signal_classes),
+        "calibration": "Score thresholds calibrated on leading MinBias jets at fixed pT cuts; "
+                       "no-score baseline uses a calibrated pT threshold. "
+                       "Rates are measured on the same MinBias events used for calibration.",
         "signal_events_read": signal["n_events"], "signal_denominator": denominator.tolist(),
         "signal_pass": numerator.tolist(), "working_points": working_points,
         "efficiency_and_6827pct_interval": intervals,
         "max_chunks": plot_data["max_chunks"],
         "signal_chunks_read": signal["n_chunks"], "background_chunks_read": background["n_chunks"],
-        "definition": "conditional on matched signal jet; leading jet before strict score/pT cuts; PDG25 mass; all decay labels",
+        "definition": "conditional on at least one merged, matched signal jet in the mass window; "
+                      "merged selection from source class labels; highest-pT selected jet before cuts; "
+                      "PDG25 mass assigned via L1-GenJet dR<0.3 and GenJet-Higgs dR<0.8",
     }
     output_dir = Path(output_dir or Path(plot_data["output_directory"]) / "plots/turn_on_mass")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -144,7 +170,7 @@ def _plot(result, output_dir):
         values = np.asarray([[np.nan if v is None else 100*v for v in row] for row in bounds])
         valid = np.isfinite(values[:, 0])
         for m in masses[~valid]:
-            print(f"No matched signal events for m_H={m:g} GeV; omitting point", flush=True)
+            print(f"No merged, matched signal events for m_X={m:g} GeV; omitting point", flush=True)
         if not valid.any():
             continue
         efficiency, low, high = values[valid].T
@@ -152,14 +178,14 @@ def _plot(result, output_dir):
         title = "No score cut" if cut is None else f"Score > {cut:g}"
         label = (title + rf", $p_T^{{L1}}>{wp['pt_threshold']:.2f}$ GeV"
                  + f" ({wp['achieved_rate_hz']/1000:.2f} kHz)")
-        baseline = cut is None or cut == 0
+        baseline = cut is None
         ax.errorbar(masses[valid], efficiency, yerr=[efficiency-low, high-efficiency],
                     fmt="o--" if baseline else "o-", fillstyle="none" if baseline else "full",
                     markersize=style.MARKERSIZE, linewidth=style.LINEWIDTH, label=label)
     hep.cms.label(ax=ax, llabel=style.CMSHEADER_LEFT, rlabel=style.CMSHEADER_RIGHT,
                   fontsize=style.CMSHEADER_SIZE)
-    ax.set(xlabel=r"Matched Higgs mass $m_H$ [GeV]",
-           ylabel=f"Conditional L1 efficiency [%] (target {result['target_rate_hz']/1000:g} kHz)",
+    ax.set(xlabel=r"Matched Higgs mass $m_X$ [GeV]",
+           ylabel=f"Level-1 Efficiency @ (target {result['target_rate_hz']/1000:g} kHz)",
            ylim=(0, 105), xlim=(float(masses.min())-5, float(masses.max())+5))
     ax.axhline(100, color="gray", linestyle=":", alpha=0.5)
     ax.grid(True, linestyle="--", alpha=0.3)
@@ -171,4 +197,5 @@ def _plot(result, output_dir):
         fig.savefig(path)
         print(f"Saved {path}", flush=True)
     plt.close(fig)
+
 

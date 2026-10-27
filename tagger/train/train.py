@@ -1,4 +1,5 @@
 import os
+import yaml
 from argparse import ArgumentParser
 
 # Third parties
@@ -8,6 +9,8 @@ import numpy as np
 from tagger.data.tools import load_data, to_ML
 from tagger.model.common import fromFolder, fromYaml
 from tagger.plot.basic import basic
+
+from tagger.config_schema import UNIFIED_CONFIG_SCHEMA
 
 os.environ["KERAS_BACKEND"] = "torch"
 
@@ -118,12 +121,13 @@ def train_weights(y_train, reco_pt_train, class_labels, weightingMethod, debug):
     return sample_weights
 
 
-def train(model, out_dir, percent, ebops):
+def train(model, training_data_dir, training_percentage):
 
     # Load the data, class_labels and input variables name, not really using input variable names to be honest
-    data_train, _, class_labels, input_vars, extra_vars = load_data("training_data/", percentage=percent)
-    
-    data_test, _, class_labels, input_vars, extra_vars = load_data("testing_data/", percentage=100)
+    data_train, _, class_labels, input_vars, extra_vars = load_data(
+        training_data_dir,
+        percentage=training_percentage,
+    )
     
     model.set_labels(
         input_vars,
@@ -133,10 +137,6 @@ def train(model, out_dir, percent, ebops):
 
     # Make into ML-like data for training
     X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train = to_ML(data_train, class_labels)
-
-    # Save X_test, y_test, and truth_pt_test for plotting later
-    X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(data_test, class_labels)
-    save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test)
 
     # Calculate the sample weights for training
     sample_weight = train_weights(
@@ -159,7 +159,8 @@ def train(model, out_dir, percent, ebops):
     model.build_model(input_shape, output_shape)
     # Train it with a pruned model
     num_samples = X_train.shape[0] * (1 - model.training_config['validation_split'])
-    model.compile_model(num_samples, ebops)
+    model.compile_model(num_samples,
+                        model.training_config["target_ebops"])
     model.fit(X_train, y_train, pt_target_train, sample_weight)
 
     model.save()
@@ -174,32 +175,32 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     # Training argument
     parser.add_argument(
-        '-o', '--output', default='output/baseline', help='Output model directory path, also save evaluation plots'
+        "-c",
+        "--config",
+        required=True,
+        help="Experiment configuration",
     )
-    parser.add_argument('-p', '--percent', default=100,type=float, help='Percentage of how much processed data to train on')
-    parser.add_argument(
-        '-y', '--yaml_config', default='tagger/model/configs/baseline_larger.yaml', help='YAML config for model'
-    )
-
-    # Basic ploting
     parser.add_argument('--plot-basic', action='store_true', help='Plot all the basic performance if set')
-    parser.add_argument(
-        '-sig', '--signal-processes', default=[], nargs='*', help='Specify all signal process for individual plotting'
-    )
-    
-    parser.add_argument(
-        '-e', '--ebops', default=300000, type=int
-    )
-
-
     args = parser.parse_args()
-
-
+    # Basic ploting
+    
+    args = parser.parse_args()
+    with open(args.config) as stream:
+        config = yaml.safe_load(stream)
+    UNIFIED_CONFIG_SCHEMA.validate(config)
+    output_dir = config["experiment"]["output"]
+    
     if args.plot_basic:
-        # All the basic plots!
-        model = fromFolder(args.output)
-        results = basic(model, args.signal_processes)
-
+        model = fromFolder(output_dir)
+        signal_processes = config["data_config"].get(
+            "signal_processes",
+            [],
+        )
+        basic(model, signal_processes)
     else:
-        model = fromYaml(args.yaml_config, args.output)
-        train(model, args.output, args.percent, args.ebops)
+        model = fromYaml(args.config, output_dir)
+        train(
+            model,
+            training_data_dir=config["data_config"]["output"],
+            training_percentage=config["experiment"]["training_percentage"],
+        )

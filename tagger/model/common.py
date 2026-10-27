@@ -13,6 +13,7 @@ from math import cos, pi
 
 
 from tagger.model.JetTagModel import JetModelFactory, JetTagModel
+from tagger.config_schema import UNIFIED_CONFIG_SCHEMA
 
 def initialise_tensorflow(num_threads):
     import tensorflow as tf
@@ -78,7 +79,16 @@ def fromYaml(yaml_path: str, folder: str, recreate: bool = True) -> JetTagModel:
     # Model must be registered for this to function
     model = JetModelFactory.create_JetTagModel(yaml_dict['model'], folder)
     # Validate yaml dict before loading
-    model.schema.validate(yaml_dict)
+    # This is done in two steps so that we can use one config file for
+    # the whole pipeline
+    # NOTE: New fields in config file should be added to the dict below
+    UNIFIED_CONFIG_SCHEMA.validate(yaml_dict)
+    model_yaml_dict = {
+        key: value
+        for key, value in yaml_dict.items()
+        if key not in {"experiment", "data_config"}
+    }
+    model.schema.validate(model_yaml_dict)
     model.load_yaml(yaml_path)
     if recreate:
         # Remove output dir if exists

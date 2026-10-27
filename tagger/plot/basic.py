@@ -181,7 +181,7 @@ def ROC_binary(y_pred, y_test, class_labels, plot_dir, class_pair, signal_proc=N
 def ROC(y_pred, y_test, class_labels, plot_dir, ROC_dict):
     # Create a colormap for unique colors
     # Use 'tab10' with enough colors
-    colormap = cm.get_cmap('Set1', len(class_labels))
+    colormap = plt.get_cmap('Set1', len(class_labels))
 
     # Create a plot for ROC curves
     fig, ax = plt.subplots(1, 1, figsize=style.FIGURE_SIZE)
@@ -661,7 +661,7 @@ def shapPlot(shap_values, feature_names, class_names):
     axis_color = "#333333"
     class_inds = np.argsort([-np.abs(shap_values[i]).mean() for i in range(len(shap_values))])
     # Use 'tab10' with enough colors
-    colormap = cm.get_cmap('Set1', len(class_names))
+    colormap = plt.get_cmap('Set1', len(class_names))
 
     for i, ind in enumerate(class_inds):
         global_shap_values = np.abs(shap_values[ind]).mean(0)
@@ -917,7 +917,7 @@ def process_labels(process_key):
 # <<<<<<<<<<<<<<<<< end of plotting functions, call basic to plot all of them
 
 
-def basic(model, signal_dirs):
+def basic(model, signal_processes):
     """
     Plot the basic ROCs for different classes. Does not reflect L1 rate
     Returns a dictionary of ROCs for each class
@@ -928,10 +928,16 @@ def basic(model, signal_dirs):
     ROC_dict = {class_label: 0 for class_label in model.class_labels}
 
     # Load the testing data
-    X_test = np.load(f"{model.output_directory}/testing_data/X_test.npy")
-    y_test = np.load(f"{model.output_directory}/testing_data/y_test.npy")
-    truth_pt_test = np.load(f"{model.output_directory}/testing_data/truth_pt_test.npy")
-    reco_pt_test = np.load(f"{model.output_directory}/testing_data/reco_pt_test.npy")
+    test_data = ak.concatenate(
+        [
+            load_data(signal_process["output"], percentage=100)[0]
+            for signal_process in signal_processes
+        ]
+    )
+    X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(
+        test_data,
+        model.class_labels,
+    )
 
     model_outputs = model.predict(X_test)
     

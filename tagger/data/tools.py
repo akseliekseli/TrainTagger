@@ -240,8 +240,7 @@ def _process_chunk(data_split, tag, extras, n_parts, chunk, outdir):
     # Save chunk to files
     outfile = os.path.join(outdir, f'data_chunk_{chunk}.root')
     with uproot.recreate(outfile) as f:
-        f["data"] = filtered_data
-
+        f.mktree("data", filtered_data)
     # Log metadata
     metadata_file = os.path.join(outdir, "metadata.json")
     _save_chunk_metadata(metadata_file, chunk, len(data_split), outfile)  # Chunk, Entries, Outfile

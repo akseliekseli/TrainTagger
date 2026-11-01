@@ -1,0 +1,19 @@
+classes:
+  H_bb:
+    - H_bb
+  H_cc:
+    - H_cc
+  H_qq:
+    - H_qq
+  H_gg:
+    - H_gg
+  H_tautau:
+    - H_tauhtaue
+    - H_tauhtauh
+    - H_tauhtaum
+  QCD:
+    - QCD_bb
+    - QCD_b
+    - QCD_cc
+    - QCD_c
+    - QCD_others

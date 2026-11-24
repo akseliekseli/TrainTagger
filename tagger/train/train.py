@@ -485,6 +485,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--data-dir",
+        required=True,
         default="/eos/home-a/asuutari/FastPUPPI/XtoHH-qcd",
         help="Directory containing training_data/ and testing_data/",
     )
@@ -517,7 +518,7 @@ if __name__ == "__main__":
     if args.plot_basic:
         # All the basic plots!
         model = fromFolder(args.output)
-        results = basic(model, args.signal_processes)
+        results = basic(model, args.signal_processes, args.data_dir)
 
     else:
         model = fromYaml(args.yaml_config, args.output)

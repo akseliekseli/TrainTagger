@@ -54,6 +54,7 @@ CLASS_LABEL_STYLE = {
     "H_cc": r"$H\rightarrow c\bar{c}$",
     "H_qq": r"$H\rightarrow q\bar{q}$",
     "H_gg": r"$H\rightarrow gg$",
+    "H_tautau": r"$H\rightarrow \tau \tau$",
     "QCD_bb": r"QCD $b\bar{b}$",
     "QCD_cc": r"QCD $c\bar{c}$",
     "QCD_b": "QCD b",

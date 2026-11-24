@@ -5,7 +5,12 @@ classes:
     - H_cc
     - H_qq
     - H_gg
+    - H_tauhtaue
+    - H_tauhtauh
+    - H_tauhtaum
   1-prong:
+    - QCD_bb
+    - QCD_cc
     - QCD_b
     - QCD_c
     - QCD_others
